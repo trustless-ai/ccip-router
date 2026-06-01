@@ -14,6 +14,7 @@ setupRouter.get('/generate-key', (c) => {
 setupRouter.post('/', async (c) => {
   const body = await c.req.json<{
     gatewayKey: string
+    adminSecret?: string
     namespace: string
     syncInterval: string
     dbPath: string
@@ -27,6 +28,7 @@ setupRouter.post('/', async (c) => {
 
   const config: ConfigFile = {
     gatewayKey:   body.gatewayKey,
+    adminSecret:  body.adminSecret?.trim() || undefined,
     namespace:    body.namespace    || 'agent-attestations',
     syncInterval: body.syncInterval || '*/5 * * * *',
     dbPath:       body.dbPath       || './data.db',
@@ -326,6 +328,11 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
         <input type="text" id="s-db" value="./data.db" class="mono"/>
         <div class="hint">SQLite file path relative to working directory.</div>
       </div>
+      <div class="field">
+        <label>Admin secret <span class="tag">optional</span></label>
+        <input type="password" id="s-admin-secret" placeholder="Leave blank for open access (dev only)"/>
+        <div class="hint">Protects the /admin dashboard. Set a strong secret for any non-local deployment.</div>
+      </div>
 
       <div class="actions">
         <button class="btn btn-ghost" onclick="goStep(1)">← Back</button>
@@ -410,13 +417,15 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
   }
 
   function buildSummary() {
-    const peers = document.getElementById('s-peers').value.split('\\n').map(s=>s.trim()).filter(Boolean)
-    const rows  = [
+    const peers  = document.getElementById('s-peers').value.split('\\n').map(s=>s.trim()).filter(Boolean)
+    const secret = document.getElementById('s-admin-secret').value.trim()
+    const rows   = [
       { k:'Signer address', v: gatewayAddr || '(derived from key)' },
       { k:'Namespace',      v: document.getElementById('s-namespace').value },
       { k:'Port',           v: document.getElementById('s-port').value },
       { k:'Sync interval',  v: document.getElementById('s-interval').value },
       { k:'DB path',        v: document.getElementById('s-db').value },
+      { k:'Admin secret',   v: secret ? '●●●●●● (set)' : 'none — open access' },
       { k:'Peers',          v: peers.length ? peers.join(', ') : 'none (standalone)' },
     ]
     document.getElementById('summary').innerHTML = rows.map(r =>
@@ -427,11 +436,13 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
   async function save() {
     const btn = document.getElementById('btn-save')
     btn.disabled = true; btn.textContent = 'Saving...'
-    const peers = document.getElementById('s-peers').value.split('\\n').map(s=>s.trim()).filter(Boolean)
+    const peers  = document.getElementById('s-peers').value.split('\\n').map(s=>s.trim()).filter(Boolean)
+    const secret = document.getElementById('s-admin-secret').value.trim()
     const res = await fetch('/setup', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({
         gatewayKey,
+        adminSecret:  secret || undefined,
         namespace:    document.getElementById('s-namespace').value,
         syncInterval: document.getElementById('s-interval').value,
         dbPath:       document.getElementById('s-db').value,

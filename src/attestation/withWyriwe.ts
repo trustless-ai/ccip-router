@@ -1,41 +1,94 @@
 import { keccak256, toBytes } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { getDB } from '../db/index.js'
 import type { ResolverFn } from '../router/index.js'
-import type { WyriweAttestation } from './eip712.js'
+import {
+  buildDomain,
+  WYRIWE_TYPES,
+  IDENTITY_SENTINEL,
+  type WyriweAttestation,
+} from './eip712.js'
 
 export type WyriweOpts = {
-  gatewayKey: `0x${string}`     // hot signing key
-  registryAddress: `0x${string}`
-  agentId: `0x${string}`        // bytes32
-  modelHash: `0x${string}`      // bytes32 — AI model identifier
+  gatewayKey:      `0x${string}`  // hot signing key
+  registryAddress: `0x${string}`  // ERC-8004 registry (verifyingContract in domain)
+  agentId:         `0x${string}`  // bytes32 — ERC-8004 agent identity
+  modelHash:       `0x${string}`  // bytes32 — AI model identifier
+  chainId?:        number         // chain where registry is deployed (default: 1)
+  // sanitizationCID?: string     // future: non-sentinel path
 }
 
-// Advanced tier — wraps any ResolverFn with WYRIWE attestation production.
-// After every resolver call:
-//   1. rawInputHash  = keccak256(calldata)
-//   2. call resolver → response
-//   3. outputHash    = keccak256(response)
-//   4. produce EIP-712 WyriweAttestation, sign with gatewayKey
-//   5. write attestation to DB + mesh
+// Advanced tier — wraps any ResolverFn with full WYRIWE attestation production.
 //
-// Basic tier callers don't use this — they pass a plain ResolverFn.
+// After every resolver call this produces an EIP-712 WyriweAttestation:
+//   1. rawInputHash             = keccak256(calldata)
+//   2. sanitizationPipelineHash = keccak256("IDENTITY_SENTINEL")  [sentinel path]
+//   3. inputHash                = rawInputHash                     [sentinel path]
+//   4. call resolver → response
+//   5. outputHash               = keccak256(response)
+//   6. sign WyriweAttestation with gatewayKey via EIP-712
+//   7. write attestation record to DB under "{namespace}:wyriwe"
+//
+// The resolver response is returned unchanged — transparent to CCIP-Read callers.
+// CcipRouter writes the basic signed record; this writes the WYRIWE attestation on top.
 export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
-  return async (sender, calldata, namespace) => {
-    // WYRIWE triple-hash chain
-    const rawInputHash = keccak256(toBytes(calldata))
-    // IDENTITY_SENTINEL path — no sanitization pipeline applied
-    // sanitizationPipelineHash = keccak256(IDENTITY_SENTINEL_CID || rawInputHash)
-    // inputHash = rawInputHash
-    // TODO: non-sentinel path when sanitization spec CID is provided
+  const account       = privateKeyToAccount(opts.gatewayKey)
+  const chainId       = opts.chainId ?? 1
+  const sentinelHash  = keccak256(toBytes(IDENTITY_SENTINEL)) as `0x${string}`
 
+  return async (sender, calldata, namespace) => {
+    // ── Triple-hash chain ──────────────────────────────────────────────────
+    const rawInputHash = keccak256(calldata)
+
+    // IDENTITY_SENTINEL path — no sanitization pipeline applied
+    const sanitizationPipelineHash = sentinelHash
+    const inputHash                = rawInputHash
+
+    // ── Resolver call ──────────────────────────────────────────────────────
     const response = await resolver(sender, calldata, namespace)
 
+    // ── Output hash ────────────────────────────────────────────────────────
     const outputHash = keccak256(toBytes(response))
 
-    // TODO: build full WyriweAttestation struct, sign with opts.gatewayKey via viem signTypedData
-    // TODO: write signed attestation to DB
+    // ── Build attestation struct ───────────────────────────────────────────
+    const timestamp = BigInt(Math.floor(Date.now() / 1000))
 
-    void rawInputHash
-    void outputHash
+    const attestation: WyriweAttestation = {
+      agentId:                  opts.agentId,
+      registry:                 opts.registryAddress,
+      modelHash:                opts.modelHash,
+      rawInputHash,
+      sanitizationPipelineHash,
+      inputHash,
+      outputHash,
+      timestamp,
+    }
+
+    // ── EIP-712 sign ───────────────────────────────────────────────────────
+    const signature = await account.signTypedData({
+      domain:      buildDomain(chainId, opts.registryAddress),
+      types:       WYRIWE_TYPES,
+      primaryType: 'WyriweAttestation',
+      message:     attestation,
+    })
+
+    // ── Persist to "{namespace}:wyriwe" ────────────────────────────────────
+    // Separate namespace avoids colliding with basic records.
+    // Mesh peers sync these alongside regular records.
+    // JSON-serialise bigint timestamp as string for DB compatibility.
+    try {
+      await getDB().insertRecord({
+        inputHash:  rawInputHash,
+        namespace:  namespace + ':wyriwe',
+        key:        rawInputHash,
+        value:      JSON.stringify({ ...attestation, timestamp: timestamp.toString() }),
+        timestamp:  Number(timestamp),
+        signature,
+        sourcePeer: null,
+      })
+    } catch (err) {
+      console.error('[wyriwe] failed to persist attestation:', err)
+    }
 
     return response
   }

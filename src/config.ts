@@ -5,6 +5,7 @@ export type Config = {
   port: number
   dbPath: string
   gatewayKey: `0x${string}` | null  // null = dry-run, no signing
+  adminSecret: string | null        // null = open access (dev/local)
   peers: string[]
   syncInterval: string              // cron expression
   syncNamespace: string
@@ -12,6 +13,7 @@ export type Config = {
 
 export type ConfigFile = {
   gatewayKey?: string
+  adminSecret?: string
   namespace?: string
   syncInterval?: string
   dbPath?: string
@@ -69,6 +71,7 @@ export function loadConfig(): Config {
     PORT:                process.env.PORT                ?? String(file.port ?? ''),
     DB_PATH:             process.env.DB_PATH             ?? file.dbPath,
     GATEWAY_PRIVATE_KEY: process.env.GATEWAY_PRIVATE_KEY ?? file.gatewayKey,
+    ADMIN_SECRET:        process.env.ADMIN_SECRET        ?? file.adminSecret,
     PEERS:               process.env.PEERS               ?? (file.peers ?? []).join(','),
     SYNC_INTERVAL:       process.env.SYNC_INTERVAL       ?? file.syncInterval,
     SYNC_NAMESPACE:      process.env.SYNC_NAMESPACE       ?? file.namespace,
@@ -84,10 +87,16 @@ export function loadConfig(): Config {
 
   const peers = parsePeers(raw.PEERS)
 
+  const adminSecret = raw.ADMIN_SECRET?.trim() || null
+  if (!adminSecret) {
+    console.warn('[config] ADMIN_SECRET not set — admin dashboard is open (dev mode)')
+  }
+
   return {
     port:          parsePort(raw.PORT),
     dbPath:        raw.DB_PATH ?? './data.db',
     gatewayKey,
+    adminSecret,
     peers,
     syncInterval:  raw.SYNC_INTERVAL ?? '*/5 * * * *',
     syncNamespace: raw.SYNC_NAMESPACE ?? 'agent-attestations',
