@@ -77,8 +77,7 @@ adminRouter.post('/siwe/verify', async (c) => {
     setAdminAddress(address)
     setAdminSession(c, address)
     console.log(`[admin] admin claimed by ${address}`)
-    // First claim → send to setup wizard to finish configuring the node
-    return c.json({ ok: true, address, claimed: true, redirect: '/setup' })
+    return c.json({ ok: true, address, claimed: true, redirect: '/admin' })
   }
 
   if (address.toLowerCase() !== config.adminAddress.toLowerCase()) {

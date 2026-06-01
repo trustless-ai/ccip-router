@@ -570,10 +570,11 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
   function buildSummary() {
     const peers  = document.getElementById('s-peers').value.split('\\n').map(s=>s.trim()).filter(Boolean)
     const secret = document.getElementById('s-admin-secret').value.trim()
-    const secretLabel = secret ? '●●●●●● (set)' : (reconfigure ? '(keep existing)' : 'none — open access ⚠')
+    const secretLabel = secret ? '●●●●●● (set)' : (reconfigure ? '(keep existing)' : 'none')
     const rows = [
       { k: 'Signer',        v: keepKey ? '(keep existing)' : (gatewayAddr || '—') },
-      { k: 'Admin secret',  v: secretLabel, warn: !secret && !reconfigure },
+      { k: 'Admin wallet',  v: 'Claim on first login via MetaMask' },
+      { k: 'Bearer secret', v: secretLabel },
       { k: 'Namespace',     v: document.getElementById('s-namespace').value },
       { k: 'Port',          v: document.getElementById('s-port').value },
       { k: 'Sync interval', v: document.getElementById('s-interval').value },
