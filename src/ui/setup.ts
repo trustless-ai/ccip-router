@@ -448,7 +448,7 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
       <div style="text-align:center;margin-bottom:20px">
         <div style="width:52px;height:52px;border-radius:50%;background:var(--green-l);border:1px solid var(--green-b);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px">✓</div>
         <div style="font-size:17px;font-weight:600;margin-bottom:4px">Node configured</div>
-        <div style="font-size:13px;color:var(--subtle);font-weight:300">Restarting — redirecting to admin panel in a moment.</div>
+        <div style="font-size:13px;color:var(--subtle);font-weight:300">Restarting — you'll be asked to claim admin with your wallet next.</div>
       </div>
       <div id="checklist" class="checklist"></div>
     </div>

@@ -77,7 +77,8 @@ adminRouter.post('/siwe/verify', async (c) => {
     setAdminAddress(address)
     setAdminSession(c, address)
     console.log(`[admin] admin claimed by ${address}`)
-    return c.json({ ok: true, address, claimed: true })
+    // First claim → send to setup wizard to finish configuring the node
+    return c.json({ ok: true, address, claimed: true, redirect: '/setup' })
   }
 
   if (address.toLowerCase() !== config.adminAddress.toLowerCase()) {
@@ -85,7 +86,7 @@ adminRouter.post('/siwe/verify', async (c) => {
   }
 
   setAdminSession(c, address)
-  return c.json({ ok: true, address, claimed: false })
+  return c.json({ ok: true, address, claimed: false, redirect: '/admin' })
 })
 
 adminRouter.post('/logout', (c) => {
@@ -728,7 +729,8 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
       })
 
       if (verifyRes.ok) {
-        window.location.href = '/admin'
+        const result = await verifyRes.json()
+        window.location.href = result.redirect || '/admin'
       } else {
         const { error } = await verifyRes.json()
         showError(error || 'Signature verification failed')
