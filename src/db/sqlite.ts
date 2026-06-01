@@ -17,6 +17,7 @@ type PeerRow = {
   last_sync_at: number
   healthy: number
   node_version: string | null
+  signer_address: string | null
 }
 
 export class SQLiteDB implements DB {
@@ -72,12 +73,13 @@ export class SQLiteDB implements DB {
       `),
 
       upsertPeer: this.db.prepare(`
-        INSERT INTO peers (url, last_sync_at, healthy, node_version)
-        VALUES (@url, @lastSyncAt, @healthy, @nodeVersion)
+        INSERT INTO peers (url, last_sync_at, healthy, node_version, signer_address)
+        VALUES (@url, @lastSyncAt, @healthy, @nodeVersion, @signerAddress)
         ON CONFLICT(url) DO UPDATE SET
-          last_sync_at = excluded.last_sync_at,
-          healthy      = excluded.healthy,
-          node_version = excluded.node_version
+          last_sync_at   = excluded.last_sync_at,
+          healthy        = excluded.healthy,
+          node_version   = excluded.node_version,
+          signer_address = excluded.signer_address
       `),
 
       getPeers: this.db.prepare(`SELECT * FROM peers`),
@@ -144,10 +146,11 @@ export class SQLiteDB implements DB {
 
   async upsertPeer(peer: PeerState): Promise<void> {
     this.stmts.upsertPeer.run({
-      url:         peer.url,
-      lastSyncAt:  peer.lastSyncAt,
-      healthy:     peer.healthy ? 1 : 0,
-      nodeVersion: peer.nodeVersion,
+      url:           peer.url,
+      lastSyncAt:    peer.lastSyncAt,
+      healthy:       peer.healthy ? 1 : 0,
+      nodeVersion:   peer.nodeVersion,
+      signerAddress: peer.signerAddress,
     })
   }
 
@@ -180,9 +183,10 @@ function toMeshRecord(row: RecordRow): MeshRecord {
 
 function toPeerState(row: PeerRow): PeerState {
   return {
-    url:         row.url,
-    lastSyncAt:  row.last_sync_at,
-    healthy:     row.healthy === 1,
-    nodeVersion: row.node_version,
+    url:           row.url,
+    lastSyncAt:    row.last_sync_at,
+    healthy:       row.healthy === 1,
+    nodeVersion:   row.node_version,
+    signerAddress: row.signer_address,
   }
 }

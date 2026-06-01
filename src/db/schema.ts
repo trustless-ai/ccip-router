@@ -13,9 +13,10 @@ export const SCHEMA = `
     ON records (namespace, timestamp);
 
   CREATE TABLE IF NOT EXISTS peers (
-    url          TEXT    PRIMARY KEY,
-    last_sync_at INTEGER NOT NULL DEFAULT 0,
-    healthy      INTEGER NOT NULL DEFAULT 1,
-    node_version TEXT
+    url             TEXT    PRIMARY KEY,
+    last_sync_at    INTEGER NOT NULL DEFAULT 0,
+    healthy         INTEGER NOT NULL DEFAULT 1,
+    node_version    TEXT,
+    signer_address  TEXT
   );
 `

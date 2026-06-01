@@ -1,10 +1,12 @@
 import { Hono } from 'hono'
+import { privateKeyToAccount } from 'viem/accounts'
 import { getConfig } from './config.js'
 import { getDB } from './db/index.js'
 import { CcipRouter } from './router/index.js'
 import { withWyriwe } from './attestation/withWyriwe.js'
 import { recordsRouter } from './mesh/records.js'
 import { verifyRouter } from './verify/verify.js'
+import { startSyncCron } from './mesh/cron.js'
 
 // Boot sequence — config first, then DB, then routes
 const config = getConfig()
@@ -14,7 +16,7 @@ const db = getDB(config.dbPath)
 // Sync cron reads from DB, not env — peers added via UI later also persist.
 await Promise.all(
   config.peers.map((url) =>
-    db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null })
+    db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
   )
 )
 
@@ -69,17 +71,31 @@ app.get('/health', async (c) => {
     db.recordCount(config.syncNamespace),
   ])
   return c.json({
-    ok:        true,
-    version:   '0.1.0',
-    namespace: config.syncNamespace,
-    peers:     peers.map((p) => ({ url: p.url, healthy: p.healthy, version: p.nodeVersion })),
-    records:   count,
-    signing:   config.gatewayKey !== null,
+    ok:            true,
+    version:       '0.1.0',
+    namespace:     config.syncNamespace,
+    signerAddress: signerAddress,
+    peers:         peers.map((p) => ({
+      url:           p.url,
+      healthy:       p.healthy,
+      nodeVersion:   p.nodeVersion,
+      signerAddress: p.signerAddress,
+      lastSyncAt:    p.lastSyncAt,
+    })),
+    records:       count,
   })
 })
 
+// Start mesh sync cron after routes are wired
+startSyncCron(config, db)
+
+const signerAddress = config.gatewayKey
+  ? privateKeyToAccount(config.gatewayKey).address
+  : null
+
 console.log(`[ccip-router] listening on :${config.port}`)
-console.log(`[ccip-router] namespace: ${config.syncNamespace}`)
-console.log(`[ccip-router] signing: ${config.gatewayKey ? 'enabled' : 'dry-run'}`)
+console.log(`[ccip-router] namespace:  ${config.syncNamespace}`)
+console.log(`[ccip-router] signing:    ${signerAddress ?? 'dry-run'}`)
+console.log(`[ccip-router] peers:      ${config.peers.length}`)
 
 export default { port: config.port, fetch: app.fetch }
