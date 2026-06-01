@@ -56,6 +56,19 @@ export const ATTESTATION_INDEX_ABI = [
   },
 ] as const
 
+export const WYRIWE_ATTESTATION_VERIFIER_ABI = [
+  {
+    type: 'function',
+    name: 'verify',
+    inputs: [
+      { name: 'attestationHash', type: 'bytes32' },
+      { name: 'proof',           type: 'bytes' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+] as const
+
 export const NODE_REGISTRY_ABI = [
   {
     type: 'function', name: 'register',

@@ -23,8 +23,10 @@
     "dist/lib.d.ts.map",
     "dist/mesh",
     "dist/router",
+    "contracts/IAttestationVerifier.sol",
     "contracts/AttestationIndex.sol",
-    "contracts/NodeRegistry.sol"
+    "contracts/NodeRegistry.sol",
+    "contracts/WyriweAttestationVerifier.sol"
   ],
   "keywords": [
     "ccip-read",
