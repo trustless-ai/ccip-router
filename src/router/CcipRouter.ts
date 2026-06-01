@@ -59,7 +59,16 @@ export class CcipRouter {
 
   private async writeRecord(calldata: `0x${string}`, response: `0x${string}`) {
     if (!this.db) return
-    // TODO: derive input_hash from calldata, write to records table
-    // db.insertRecord({ namespace: this.namespace, key: inputHash, value: response, ... })
+    // TODO: derive input_hash = keccak256(calldata) via viem
+    // TODO: derive signature via gateway hot key
+    await this.db.insertRecord({
+      inputHash:  calldata, // placeholder until keccak256 wired
+      namespace:  this.namespace,
+      key:        calldata,
+      value:      response,
+      timestamp:  Math.floor(Date.now() / 1000),
+      signature:  '0x',    // placeholder until signing wired
+      sourcePeer: null,
+    })
   }
 }

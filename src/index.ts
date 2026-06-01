@@ -3,6 +3,7 @@ import { CcipRouter } from './router/index.js'
 import { withWyriwe } from './attestation/withWyriwe.js'
 import { recordsRouter } from './mesh/records.js'
 import { verifyRouter } from './verify/verify.js'
+import { getDB } from './db/index.js'
 
 // ---------------------------------------------------------------------------
 // Basic usage — plug in any resolver, no attestation required
@@ -44,7 +45,18 @@ app.route('/', ccip.hono())
 app.route('/records', recordsRouter)
 app.route('/verify', verifyRouter)
 
-app.get('/health', (c) => c.json({ ok: true, version: '0.1.0' }))
+app.get('/health', async (c) => {
+  const db = getDB()
+  const ns = process.env.SYNC_NAMESPACE ?? 'default'
+  const [peers, count] = await Promise.all([db.getPeers(), db.recordCount(ns)])
+  return c.json({
+    ok:      true,
+    version: '0.1.0',
+    peers:   peers.length,
+    records: count,
+    namespace: ns,
+  })
+})
 
 const port = Number(process.env.PORT ?? 3000)
 console.log(`ccip-router listening on :${port}`)
