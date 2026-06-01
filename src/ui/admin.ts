@@ -6,41 +6,26 @@ import { syncAll } from '../mesh/sync.js'
 
 export const adminRouter = new Hono()
 
-// ── API ─────────────────────────────────────────────────────────────────────
+// ── API ──────────────────────────────────────────────────────────────────────
 
 adminRouter.get('/api/status', async (c) => {
   const config = getConfig()
   const db     = getDB()
-
   const [peers, count, recent] = await Promise.all([
     db.getPeers(),
     db.recordCount(config.syncNamespace),
     db.getRecentRecords(config.syncNamespace, 8),
   ])
-
-  const signerAddress = config.gatewayKey
-    ? privateKeyToAccount(config.gatewayKey).address
-    : null
-
+  const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
-    version:       '0.1.0',
-    signerAddress,
-    namespace:     config.syncNamespace,
-    syncInterval:  config.syncInterval,
-    port:          config.port,
-    records:       count,
-    peers:         peers.map((p) => ({
-      url:           p.url,
-      healthy:       p.healthy,
-      signerAddress: p.signerAddress,
-      nodeVersion:   p.nodeVersion,
-      lastSyncAt:    p.lastSyncAt,
+    version: '0.1.0', signerAddress,
+    namespace: config.syncNamespace, syncInterval: config.syncInterval,
+    records: count,
+    peers: peers.map((p) => ({
+      url: p.url, healthy: p.healthy,
+      signerAddress: p.signerAddress, nodeVersion: p.nodeVersion, lastSyncAt: p.lastSyncAt,
     })),
-    recent: recent.map((r) => ({
-      inputHash:  r.inputHash,
-      timestamp:  r.timestamp,
-      sourcePeer: r.sourcePeer,
-    })),
+    recent: recent.map((r) => ({ inputHash: r.inputHash, timestamp: r.timestamp, sourcePeer: r.sourcePeer })),
   })
 })
 
@@ -54,21 +39,9 @@ adminRouter.post('/api/sync', async (c) => {
 adminRouter.post('/api/peers', async (c) => {
   const { url } = await c.req.json<{ url: string }>()
   if (!url) return c.json({ error: 'url required' }, 400)
-
   let parsed: URL
-  try { parsed = new URL(url) } catch {
-    return c.json({ error: 'Invalid URL' }, 400)
-  }
-
-  const db = getDB()
-  await db.upsertPeer({
-    url:           parsed.toString().replace(/\/$/, ''),
-    lastSyncAt:    0,
-    healthy:       true,
-    nodeVersion:   null,
-    signerAddress: null,
-  })
-
+  try { parsed = new URL(url) } catch { return c.json({ error: 'Invalid URL' }, 400) }
+  await getDB().upsertPeer({ url: parsed.toString().replace(/\/$/, ''), lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
   return c.json({ ok: true })
 })
 
@@ -79,360 +52,307 @@ adminRouter.delete('/api/peers', async (c) => {
   return c.json({ ok: true })
 })
 
-// ── Dashboard HTML ───────────────────────────────────────────────────────────
+// ── Dashboard HTML ────────────────────────────────────────────────────────────
 
 adminRouter.get('/', (c) => c.html(ADMIN_HTML))
 
 const ADMIN_HTML = /* html */`<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ccip-router — admin</title>
+  <link rel="icon" href="/favicon.svg"/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet"/>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --bg:      #0d0d0d;
-      --surface: #161616;
-      --surface2:#1e1e1e;
-      --border:  #2a2a2a;
-      --muted:   #555;
-      --text:    #e8e8e8;
-      --subtle:  #888;
-      --accent:  #7c6af7;
-      --green:   #4ade80;
-      --red:     #f87171;
-      --yellow:  #fbbf24;
-      --mono:    'JetBrains Mono', 'Fira Code', monospace;
+      --bg:       #000;
+      --s1:       rgba(255,255,255,0.04);
+      --s2:       rgba(255,255,255,0.07);
+      --border:   rgba(255,255,255,0.08);
+      --border-h: rgba(255,255,255,0.16);
+      --text:     #fff;
+      --subtle:   #888;
+      --muted:    #555;
+      --accent:   #6366f1;
+      --accent-v: #8b5cf6;
+      --accent-l: rgba(99,102,241,0.15);
+      --accent-b: rgba(99,102,241,0.3);
+      --indigo:   #818cf8;
+      --green:    #22c55e;
+      --green-l:  rgba(34,197,94,0.15);
+      --green-b:  rgba(34,197,94,0.3);
+      --red:      #ef4444;
+      --red-l:    rgba(239,68,68,0.15);
+      --amber:    #f59e0b;
+      --mono:     ui-monospace, 'SFMono-Regular', Menlo, monospace;
     }
 
     body {
       background: var(--bg);
       color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
+      font-family: 'Poppins', sans-serif;
+      font-size: 14px; font-weight: 400; line-height: 1.5;
       min-height: 100vh;
     }
 
     /* ── Header ── */
     header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 28px; height: 56px;
       border-bottom: 1px solid var(--border);
-      background: var(--surface);
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(12px);
       position: sticky; top: 0; z-index: 10;
     }
 
-    .logo { display: flex; align-items: center; gap: 10px; }
-    .logo-mark {
-      width: 28px; height: 28px;
-      background: var(--accent); border-radius: 6px;
+    .logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+    .logo-icon {
+      width: 30px; height: 30px;
+      background: var(--accent-l); border: 1px solid var(--accent-b);
+      border-radius: 8px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 14px;
     }
-    .logo-name { font-size: 14px; font-weight: 600; }
+    .logo-icon img { width: 18px; height: 18px; }
+    .logo-name { font-size: 14px; font-weight: 600; color: var(--text); }
 
-    .header-meta {
-      display: flex; align-items: center; gap: 16px;
-    }
+    .header-right { display: flex; align-items: center; gap: 10px; }
 
-    .badge {
-      display: inline-flex; align-items: center; gap: 5px;
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 6px; padding: 4px 10px;
+    .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 8px; padding: 5px 12px;
       font-size: 12px; color: var(--subtle);
     }
-    .badge .dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--green);
-    }
-    .badge .addr { font-family: var(--mono); color: var(--text); }
-
-    .ns-badge {
-      background: #1a1730; border: 1px solid #2d2550;
-      border-radius: 6px; padding: 4px 10px;
-      font-size: 12px; color: var(--accent);
-    }
+    .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); flex-shrink: 0; }
+    .pill .addr { font-family: var(--mono); color: var(--text); }
+    .pill.ns { background: var(--accent-l); border-color: var(--accent-b); color: var(--indigo); }
 
     /* ── Buttons ── */
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
-      border: none; border-radius: 7px;
-      font-size: 12px; font-weight: 500;
-      padding: 7px 14px; cursor: pointer;
-      transition: all 0.15s;
+      border: none; border-radius: 9px;
+      font-size: 12px; font-weight: 500; font-family: inherit;
+      padding: 7px 16px; cursor: pointer; transition: all 0.15s;
     }
-    .btn-ghost {
-      background: transparent; border: 1px solid var(--border); color: var(--subtle);
-    }
-    .btn-ghost:hover { border-color: var(--text); color: var(--text); }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #9585ff; }
-    .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-    .btn-danger { background: transparent; border: 1px solid #3a1a1a; color: var(--red); }
-    .btn-danger:hover { background: #1a0808; }
-    .btn-sm { padding: 5px 10px; font-size: 11px; }
+    .btn-ghost { background: var(--s1); border: 1px solid var(--border); color: var(--subtle); }
+    .btn-ghost:hover { border-color: var(--border-h); color: var(--text); background: var(--s2); }
+    .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 0 16px rgba(99,102,241,0.2); }
+    .btn-primary:hover { background: var(--accent-v); box-shadow: 0 0 24px rgba(139,92,246,0.3); }
+    .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+    .btn-danger { background: var(--red-l); border: 1px solid rgba(239,68,68,0.2); color: var(--red); }
+    .btn-danger:hover { background: rgba(239,68,68,0.25); }
+    .btn-sm { padding: 5px 10px; font-size: 11px; border-radius: 7px; }
+    .btn-icon { padding: 5px 8px; }
 
     /* ── Layout ── */
-    main { max-width: 1100px; margin: 0 auto; padding: 28px 24px; }
+    main { max-width: 1060px; margin: 0 auto; padding: 28px 24px; }
 
-    /* ── Stats row ── */
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 14px;
-      margin-bottom: 28px;
-    }
+    /* ── Stats ── */
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
 
-    .stat-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 18px 20px;
+    .stat {
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 14px; padding: 20px 22px;
+      transition: border-color 0.2s;
     }
-    .stat-label { font-size: 11px; color: var(--subtle); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
-    .stat-value { font-size: 28px; font-weight: 600; font-family: var(--mono); }
-    .stat-sub   { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .stat:hover { border-color: var(--border-h); }
+    .stat-label { font-size: 11px; color: var(--subtle); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
+    .stat-value { font-size: 30px; font-weight: 600; font-family: var(--mono); line-height: 1; }
+    .stat-sub   { font-size: 11px; color: var(--muted); margin-top: 6px; font-weight: 300; }
 
     /* ── Panels ── */
-    .panels {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 18px;
-    }
-
-    @media (max-width: 720px) {
-      .panels { grid-template-columns: 1fr; }
-      .stats  { grid-template-columns: 1fr; }
-    }
+    .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 700px) { .panels { grid-template-columns: 1fr; } .stats { grid-template-columns: 1fr; } }
 
     .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden;
     }
 
     .panel-header {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--border);
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
     }
-    .panel-title { font-size: 13px; font-weight: 600; }
-    .panel-body  { padding: 0; }
+    .panel-title { font-size: 13px; font-weight: 500; }
 
-    /* ── Peers table ── */
+    /* ── Peers ── */
     .peer-row {
       display: flex; align-items: center; gap: 12px;
-      padding: 12px 18px;
-      border-bottom: 1px solid var(--border);
+      padding: 12px 18px; border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
     }
     .peer-row:last-child { border-bottom: none; }
+    .peer-row:hover { background: rgba(255,255,255,0.02); }
 
-    .peer-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      flex-shrink: 0;
+    .health-dot {
+      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
     }
-    .peer-dot.healthy   { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .peer-dot.unhealthy { background: var(--red); }
+    .health-dot.ok  { background: var(--green); box-shadow: 0 0 8px rgba(34,197,94,0.5); }
+    .health-dot.err { background: var(--red); }
 
     .peer-info { flex: 1; min-width: 0; }
     .peer-url  { font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .peer-meta { font-size: 11px; color: var(--subtle); margin-top: 2px; font-family: var(--mono); }
+    .peer-meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: var(--mono); }
 
-    .peer-actions { display: flex; gap: 6px; flex-shrink: 0; }
+    .peer-actions { display: flex; gap: 5px; flex-shrink: 0; }
 
-    .empty-state {
-      padding: 28px 18px;
-      text-align: center;
-      color: var(--muted);
-      font-size: 13px;
+    .empty {
+      padding: 32px 18px; text-align: center;
+      color: var(--muted); font-size: 12px; font-weight: 300;
     }
 
-    /* ── Add peer form ── */
-    .add-peer-form {
-      display: flex; gap: 8px;
-      padding: 12px 18px;
+    /* ── Add peer ── */
+    .add-peer {
+      display: flex; gap: 8px; padding: 12px 18px;
       border-top: 1px solid var(--border);
     }
-    .add-peer-form input {
-      flex: 1;
-      background: var(--bg); border: 1px solid var(--border);
-      border-radius: 7px; color: var(--text);
-      font-size: 12px; font-family: var(--mono);
-      padding: 7px 10px; outline: none;
-      transition: border-color 0.15s;
+    .add-peer input {
+      flex: 1; background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border); border-radius: 9px;
+      color: var(--text); font-size: 12px; font-family: var(--mono);
+      padding: 7px 12px; outline: none; transition: border-color 0.15s;
     }
-    .add-peer-form input:focus { border-color: var(--accent); }
+    .add-peer input:focus { border-color: rgba(99,102,241,0.4); }
 
-    /* ── Records list ── */
+    /* ── Records ── */
     .record-row {
       display: flex; align-items: center; gap: 10px;
-      padding: 10px 18px;
-      border-bottom: 1px solid var(--border);
+      padding: 10px 18px; border-bottom: 1px solid var(--border);
       font-size: 12px;
     }
     .record-row:last-child { border-bottom: none; }
+    .record-row:hover { background: rgba(255,255,255,0.02); }
 
-    .record-hash { font-family: var(--mono); color: var(--accent); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .record-time { color: var(--muted); flex-shrink: 0; font-size: 11px; }
-    .record-source { color: var(--subtle); font-size: 11px; flex-shrink: 0; }
+    .record-hash   { font-family: var(--mono); color: var(--indigo); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .record-source { font-size: 10px; flex-shrink: 0; padding: 2px 7px; border-radius: 5px; }
+    .record-source.local { background: var(--accent-l); color: var(--indigo); border: 1px solid var(--accent-b); }
+    .record-source.peer  { background: var(--green-l);  color: var(--green);  border: 1px solid var(--green-b); }
+    .record-time   { color: var(--muted); flex-shrink: 0; font-size: 10px; font-family: var(--mono); }
 
-    /* ── Sync feedback ── */
-    .sync-toast {
+    /* ── Node info ── */
+    .node-bar {
+      margin-top: 18px;
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 14px; padding: 16px 22px;
+      display: flex; gap: 32px; flex-wrap: wrap; align-items: center;
+    }
+    .ninfo-item .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+    .ninfo-item .val { font-family: var(--mono); font-size: 12px; color: var(--text); }
+
+    /* ── Toast ── */
+    .toast {
       position: fixed; bottom: 24px; right: 24px;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 8px; padding: 10px 16px;
-      font-size: 13px; color: var(--green);
-      opacity: 0; transform: translateY(8px);
-      transition: all 0.2s;
-      pointer-events: none;
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 18px;
+      font-size: 12px; color: var(--green);
+      opacity: 0; transform: translateY(6px);
+      transition: all 0.2s; pointer-events: none;
+      backdrop-filter: blur(12px);
     }
-    .sync-toast.show { opacity: 1; transform: translateY(0); }
-
-    /* ── Node info footer ── */
-    .node-info {
-      margin-top: 20px;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 10px; padding: 16px 20px;
-      display: flex; gap: 28px; flex-wrap: wrap;
-    }
-    .info-item { }
-    .info-label { font-size: 11px; color: var(--subtle); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
-    .info-value { font-family: var(--mono); font-size: 12px; }
+    .toast.show { opacity: 1; transform: translateY(0); }
   </style>
 </head>
 <body>
 
 <header>
   <div class="logo">
-    <div class="logo-mark">⬡</div>
+    <div class="logo-icon"><img src="/favicon.svg" alt=""/></div>
     <div class="logo-name">ccip-router</div>
   </div>
-  <div class="header-meta">
-    <div class="badge">
-      <div class="dot"></div>
-      <span class="addr" id="h-addr">loading...</span>
-    </div>
-    <div class="ns-badge" id="h-ns">—</div>
-    <button class="btn btn-primary btn-sm" id="btn-sync" onclick="syncNow()">⟳ Sync now</button>
+  <div class="header-right">
+    <div class="pill"><div class="dot"></div><span class="addr" id="h-addr">—</span></div>
+    <div class="pill ns" id="h-ns">—</div>
+    <button class="btn btn-primary btn-sm" id="btn-sync" onclick="syncNow()">⟳ Sync</button>
   </div>
 </header>
 
 <main>
 
-  <!-- Stats -->
   <div class="stats">
-    <div class="stat-card">
+    <div class="stat">
       <div class="stat-label">Records</div>
       <div class="stat-value" id="s-records">—</div>
-      <div class="stat-sub" id="s-namespace">—</div>
+      <div class="stat-sub" id="s-ns-sub">—</div>
     </div>
-    <div class="stat-card">
+    <div class="stat">
       <div class="stat-label">Peers</div>
       <div class="stat-value" id="s-peers">—</div>
       <div class="stat-sub" id="s-healthy">—</div>
     </div>
-    <div class="stat-card">
+    <div class="stat">
       <div class="stat-label">Last sync</div>
-      <div class="stat-value" style="font-size:20px;padding-top:4px" id="s-lastsync">—</div>
+      <div class="stat-value" style="font-size:18px;padding-top:6px" id="s-sync">—</div>
       <div class="stat-sub" id="s-interval">—</div>
     </div>
   </div>
 
-  <!-- Panels -->
   <div class="panels">
 
-    <!-- Peers panel -->
     <div class="panel">
       <div class="panel-header">
         <div class="panel-title">Peers</div>
       </div>
-      <div class="panel-body" id="peers-list">
-        <div class="empty-state">Loading...</div>
-      </div>
-      <div class="add-peer-form">
-        <input type="text" id="peer-input" placeholder="https://gateway-b.example.com" />
+      <div id="peers-list"><div class="empty">Loading...</div></div>
+      <div class="add-peer">
+        <input type="text" id="peer-input" placeholder="https://gateway-b.example.com"/>
         <button class="btn btn-ghost btn-sm" onclick="addPeer()">+ Add</button>
       </div>
     </div>
 
-    <!-- Records panel -->
     <div class="panel">
       <div class="panel-header">
         <div class="panel-title">Recent records</div>
       </div>
-      <div class="panel-body" id="records-list">
-        <div class="empty-state">Loading...</div>
-      </div>
+      <div id="records-list"><div class="empty">Loading...</div></div>
     </div>
 
   </div>
 
-  <!-- Node info -->
-  <div class="node-info" id="node-info" style="display:none">
-    <div class="info-item">
-      <div class="info-label">Signer address</div>
-      <div class="info-value" id="ni-addr">—</div>
-    </div>
-    <div class="info-item">
-      <div class="info-label">Sync interval</div>
-      <div class="info-value" id="ni-interval">—</div>
-    </div>
-    <div class="info-item">
-      <div class="info-label">DB path</div>
-      <div class="info-value" id="ni-db">—</div>
-    </div>
-    <div class="info-item">
-      <div class="info-label">Version</div>
-      <div class="info-value" id="ni-version">—</div>
+  <div class="node-bar" id="node-bar" style="display:none">
+    <div class="ninfo-item"><div class="lbl">Signer</div><div class="val" id="ni-addr">—</div></div>
+    <div class="ninfo-item"><div class="lbl">Interval</div><div class="val" id="ni-interval">—</div></div>
+    <div class="ninfo-item"><div class="lbl">Version</div><div class="val" id="ni-version">—</div></div>
+    <div style="margin-left:auto">
+      <a href="/setup" class="btn btn-ghost btn-sm">⚙ Reconfigure</a>
     </div>
   </div>
 
 </main>
 
-<div class="sync-toast" id="toast"></div>
+<div class="toast" id="toast"></div>
 
 <script>
-  let status = null
-
   function rel(ts) {
     if (!ts) return 'never'
-    const s = Math.floor(Date.now() / 1000) - ts
+    const s = Math.floor(Date.now()/1000) - ts
     if (s < 60)   return s + 's ago'
-    if (s < 3600) return Math.floor(s / 60) + 'm ago'
-    return Math.floor(s / 3600) + 'h ago'
+    if (s < 3600) return Math.floor(s/60) + 'm ago'
+    return Math.floor(s/3600) + 'h ago'
   }
 
-  function truncate(str, n) {
-    if (!str) return '—'
-    return str.length > n ? str.slice(0, n) + '...' : str
-  }
+  function trunc(s, n) { return s && s.length > n ? s.slice(0,6)+'...'+s.slice(-4) : (s||'—') }
 
   function renderPeers(peers) {
     const el = document.getElementById('peers-list')
     if (!peers.length) {
-      el.innerHTML = '<div class="empty-state">No peers configured.<br>Add one below to join the mesh.</div>'
+      el.innerHTML = '<div class="empty">No peers yet.<br>Add a URL below to join the mesh.</div>'
       return
     }
     el.innerHTML = peers.map(p => \`
       <div class="peer-row">
-        <div class="peer-dot \${p.healthy ? 'healthy' : 'unhealthy'}"></div>
+        <div class="health-dot \${p.healthy ? 'ok' : 'err'}"></div>
         <div class="peer-info">
           <div class="peer-url">\${p.url}</div>
-          <div class="peer-meta">
-            \${p.signerAddress ? truncate(p.signerAddress, 20) : 'signer unknown'} &nbsp;·&nbsp;
-            \${rel(p.lastSyncAt)}
-            \${p.nodeVersion ? ' &nbsp;·&nbsp; v' + p.nodeVersion : ''}
-          </div>
+          <div class="peer-meta">\${trunc(p.signerAddress,20)} · \${rel(p.lastSyncAt)}\${p.nodeVersion ? ' · v'+p.nodeVersion : ''}</div>
         </div>
         <div class="peer-actions">
-          <button class="btn btn-ghost btn-sm" onclick="syncPeer('\${p.url}')">⟳</button>
-          <button class="btn btn-danger btn-sm" onclick="removePeer('\${p.url}')">✕</button>
+          <button class="btn btn-ghost btn-sm btn-icon" title="Sync now" onclick="syncNow()">⟳</button>
+          <button class="btn btn-danger btn-sm btn-icon" title="Remove" onclick="removePeer('\${p.url}')">✕</button>
         </div>
       </div>
     \`).join('')
@@ -441,13 +361,13 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   function renderRecords(records) {
     const el = document.getElementById('records-list')
     if (!records.length) {
-      el.innerHTML = '<div class="empty-state">No records yet.<br>Call the CCIP handler to write one.</div>'
+      el.innerHTML = '<div class="empty">No records yet.<br>Call the CCIP handler to write one.</div>'
       return
     }
     el.innerHTML = records.map(r => \`
       <div class="record-row">
         <div class="record-hash">\${r.inputHash}</div>
-        <div class="record-source">\${r.sourcePeer ? '↓ peer' : '● local'}</div>
+        <div class="record-source \${r.sourcePeer ? 'peer' : 'local'}">\${r.sourcePeer ? '↓ peer' : '● local'}</div>
         <div class="record-time">\${rel(r.timestamp)}</div>
       </div>
     \`).join('')
@@ -455,52 +375,36 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
   async function load() {
     const res = await fetch('/admin/api/status')
-    status = await res.json()
+    const d   = await res.json()
 
-    // header
-    document.getElementById('h-addr').textContent = status.signerAddress
-      ? status.signerAddress.slice(0, 6) + '...' + status.signerAddress.slice(-4)
-      : 'dry-run'
-    document.getElementById('h-ns').textContent = status.namespace
+    document.getElementById('h-addr').textContent = d.signerAddress ? trunc(d.signerAddress, 20) : 'dry-run'
+    document.getElementById('h-ns').textContent   = d.namespace
 
-    // stats
-    document.getElementById('s-records').textContent  = status.records
-    document.getElementById('s-namespace').textContent = status.namespace
-    document.getElementById('s-peers').textContent    = status.peers.length
-    const healthy = status.peers.filter(p => p.healthy).length
-    document.getElementById('s-healthy').textContent  = healthy + ' healthy'
+    document.getElementById('s-records').textContent  = d.records
+    document.getElementById('s-ns-sub').textContent   = d.namespace
+    document.getElementById('s-peers').textContent    = d.peers.length
+    document.getElementById('s-healthy').textContent  = d.peers.filter(p=>p.healthy).length + ' healthy'
 
-    const lastSyncs = status.peers.map(p => p.lastSyncAt).filter(Boolean)
-    const lastSync  = lastSyncs.length ? Math.max(...lastSyncs) : 0
-    document.getElementById('s-lastsync').textContent = rel(lastSync)
-    document.getElementById('s-interval').textContent  = status.syncInterval
+    const syncs   = d.peers.map(p=>p.lastSyncAt).filter(Boolean)
+    document.getElementById('s-sync').textContent     = syncs.length ? rel(Math.max(...syncs)) : 'never'
+    document.getElementById('s-interval').textContent = d.syncInterval
 
-    // panels
-    renderPeers(status.peers)
-    renderRecords(status.recent)
+    renderPeers(d.peers)
+    renderRecords(d.recent)
 
-    // node info
-    document.getElementById('ni-addr').textContent     = status.signerAddress || 'dry-run'
-    document.getElementById('ni-interval').textContent = status.syncInterval
-    document.getElementById('ni-version').textContent  = status.version
-    document.getElementById('node-info').style.display = 'flex'
+    document.getElementById('ni-addr').textContent     = d.signerAddress || 'dry-run'
+    document.getElementById('ni-interval').textContent = d.syncInterval
+    document.getElementById('ni-version').textContent  = d.version
+    document.getElementById('node-bar').style.display  = 'flex'
   }
 
   async function syncNow() {
     const btn = document.getElementById('btn-sync')
-    btn.disabled = true
-    btn.textContent = '⟳ Syncing...'
-    await fetch('/admin/api/sync', { method: 'POST' })
+    btn.disabled = true; btn.textContent = '⟳ Syncing...'
+    await fetch('/admin/api/sync', { method:'POST' })
     await load()
-    btn.disabled = false
-    btn.textContent = '⟳ Sync now'
+    btn.disabled = false; btn.textContent = '⟳ Sync'
     toast('Sync complete')
-  }
-
-  async function syncPeer(url) {
-    await fetch('/admin/api/sync', { method: 'POST' })
-    await load()
-    toast('Synced ' + url)
   }
 
   async function addPeer() {
@@ -508,46 +412,29 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     const url   = input.value.trim()
     if (!url) return
     const res = await fetch('/admin/api/peers', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url}),
     })
-    if (res.ok) {
-      input.value = ''
-      await load()
-      toast('Peer added')
-    } else {
-      const data = await res.json()
-      alert(data.error || 'Failed to add peer')
-    }
+    if (res.ok) { input.value=''; await load(); toast('Peer added') }
+    else { const d=await res.json(); alert(d.error||'Failed') }
   }
 
   async function removePeer(url) {
-    if (!confirm('Remove peer ' + url + '?')) return
+    if (!confirm('Remove ' + url + '?')) return
     await fetch('/admin/api/peers', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      method:'DELETE', headers:{'Content-Type':'application/json'}, body:JSON.stringify({url}),
     })
-    await load()
-    toast('Peer removed')
+    await load(); toast('Peer removed')
   }
 
   function toast(msg) {
     const el = document.getElementById('toast')
-    el.textContent = msg
-    el.classList.add('show')
+    el.textContent = msg; el.classList.add('show')
     setTimeout(() => el.classList.remove('show'), 2500)
   }
 
-  // initial load + auto-refresh every 15s
   load()
   setInterval(load, 15000)
-
-  // add peer on Enter
-  document.getElementById('peer-input')?.addEventListener('keydown', e => {
-    if (e.key === 'Enter') addPeer()
-  })
+  document.getElementById('peer-input')?.addEventListener('keydown', e => { if(e.key==='Enter') addPeer() })
 </script>
 </body>
 </html>`
