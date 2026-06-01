@@ -1,4 +1,4 @@
-import type { MeshRecord } from './records.js'
+import type { MeshRecord } from '../db/types.js'
 
 export type PeerSyncState = {
   url: string

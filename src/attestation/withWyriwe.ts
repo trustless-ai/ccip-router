@@ -1,3 +1,4 @@
+import { keccak256, toBytes } from 'viem'
 import type { ResolverFn } from '../router/index.js'
 import type { WyriweAttestation } from './eip712.js'
 
@@ -19,15 +20,22 @@ export type WyriweOpts = {
 // Basic tier callers don't use this — they pass a plain ResolverFn.
 export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
   return async (sender, calldata, namespace) => {
-    // TODO: rawInputHash = keccak256(calldata)
-    // TODO: sanitizationPipelineHash — IDENTITY_SENTINEL path if no sanitization
-    // TODO: inputHash = keccak256(sanitized_input)
+    // WYRIWE triple-hash chain
+    const rawInputHash = keccak256(toBytes(calldata))
+    // IDENTITY_SENTINEL path — no sanitization pipeline applied
+    // sanitizationPipelineHash = keccak256(IDENTITY_SENTINEL_CID || rawInputHash)
+    // inputHash = rawInputHash
+    // TODO: non-sentinel path when sanitization spec CID is provided
 
     const response = await resolver(sender, calldata, namespace)
 
-    // TODO: outputHash = keccak256(response)
-    // TODO: build WyriweAttestation, sign with opts.gatewayKey via viem
-    // TODO: write attestation to DB (feeds /verify and mesh sync)
+    const outputHash = keccak256(toBytes(response))
+
+    // TODO: build full WyriweAttestation struct, sign with opts.gatewayKey via viem signTypedData
+    // TODO: write signed attestation to DB
+
+    void rawInputHash
+    void outputHash
 
     return response
   }

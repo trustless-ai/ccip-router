@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Config } from '../config.js'
 import type { DB } from '../db/types.js'
+import { hashCalldata, signRecord } from '../crypto/index.js'
 
 // The function the operator supplies — all resolver logic lives here.
 // ccip-router owns: CCIP-Read decode, record writing, mesh sync.
@@ -63,15 +64,21 @@ export class CcipRouter {
 
   private async writeRecord(calldata: `0x${string}`, response: `0x${string}`) {
     if (!this.db) return
-    // TODO: derive input_hash = keccak256(calldata) via viem
-    // TODO: derive signature via gateway hot key
+
+    const inputHash = hashCalldata(calldata)
+    const timestamp = Math.floor(Date.now() / 1000)
+
+    const signature = this.gatewayKey
+      ? await signRecord(inputHash, this.namespace, response, timestamp, this.gatewayKey)
+      : '0x' // dry-run — unsigned, peers will reject on verify
+
     await this.db.insertRecord({
-      inputHash:  calldata, // placeholder until keccak256 wired
+      inputHash,
       namespace:  this.namespace,
-      key:        calldata,
+      key:        inputHash,
       value:      response,
-      timestamp:  Math.floor(Date.now() / 1000),
-      signature:  '0x',    // placeholder until signing wired
+      timestamp,
+      signature,
       sourcePeer: null,
     })
   }
