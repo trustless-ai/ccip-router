@@ -58,6 +58,7 @@ verifyRouter.get('/:inputHash', async (c) => {
                 sanitizationPipelineHash: attestation.sanitizationPipelineHash,
                 inputHash:                attestation.inputHash,
                 outputHash:               attestation.outputHash,
+                commitmentHash:           attestation.commitmentHash,
               }
             : null,
         }

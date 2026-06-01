@@ -55,15 +55,16 @@ export async function recoverWyriweAttestation(
 ): Promise<`0x${string}` | null> {
   try {
     const att = JSON.parse(record.value) as {
-      agentId: `0x${string}`
-      registry: `0x${string}`
-      modelHash: `0x${string}`
-      rawInputHash: `0x${string}`
+      agentId:                  `0x${string}`
+      registry:                 `0x${string}`
+      modelHash:                `0x${string}`
+      rawInputHash:             `0x${string}`
       sanitizationPipelineHash: `0x${string}`
-      inputHash: `0x${string}`
-      outputHash: `0x${string}`
-      timestamp: string
-      chainId: number
+      inputHash:                `0x${string}`
+      outputHash:               `0x${string}`
+      commitmentHash:           `0x${string}`
+      timestamp:                string
+      chainId:                  number
     }
 
     return recoverTypedDataAddress({
@@ -78,6 +79,7 @@ export async function recoverWyriweAttestation(
         sanitizationPipelineHash: att.sanitizationPipelineHash,
         inputHash:                att.inputHash,
         outputHash:               att.outputHash,
+        commitmentHash:           att.commitmentHash,
         timestamp:                BigInt(att.timestamp),
       },
       signature: record.signature as `0x${string}`,

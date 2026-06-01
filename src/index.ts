@@ -7,6 +7,7 @@ import { CcipRouter } from './router/index.js'
 import { withWyriwe } from './attestation/withWyriwe.js'
 import { recordsRouter } from './mesh/records.js'
 import { verifyRouter } from './verify/verify.js'
+import { ocpRouter } from './verify/ocp.js'
 import { startSyncCron } from './mesh/cron.js'
 import { setupRouter } from './ui/setup.js'
 import { adminRouter } from './ui/admin.js'
@@ -95,6 +96,7 @@ const ccip = new CcipRouter({
 // Specific named routes must be registered before the CCIP wildcard /:sender/:data
 app.route('/records', recordsRouter)
 app.route('/verify', verifyRouter)
+app.route('/ocp', ocpRouter)
 app.route('/', ccip.hono())
 
 app.get('/health', async (c) => {

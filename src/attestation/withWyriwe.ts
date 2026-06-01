@@ -8,6 +8,7 @@ import {
   IDENTITY_SENTINEL,
   type WyriweAttestation,
 } from './eip712.js'
+import { buildCommitmentHash } from './ocp.js'
 
 export type WyriweOpts = {
   gatewayKey:      `0x${string}`  // hot signing key
@@ -50,9 +51,18 @@ export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
     // ── Output hash ────────────────────────────────────────────────────────
     const outputHash = keccak256(toBytes(response))
 
-    // ── Build attestation struct ───────────────────────────────────────────
+    // ── OCP commitment hash (ERC-8263) ────────────────────────────────────
     const timestamp = BigInt(Math.floor(Date.now() / 1000))
 
+    const commitmentHash = buildCommitmentHash({
+      agentId:    opts.agentId,
+      modelHash:  opts.modelHash,
+      inputHash,     // sanitized input (== rawInputHash on sentinel path)
+      outputHash,
+      timestamp,
+    })
+
+    // ── Build attestation struct ───────────────────────────────────────────
     const attestation: WyriweAttestation = {
       agentId:                  opts.agentId,
       registry:                 opts.registryAddress,
@@ -61,6 +71,7 @@ export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
       sanitizationPipelineHash,
       inputHash,
       outputHash,
+      commitmentHash,
       timestamp,
     }
 

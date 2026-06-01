@@ -2,7 +2,7 @@
 // Implements the WYRIWE attestation profile (ERC8004AttestationGateway domain)
 
 export const ATTESTATION_TYPEHASH =
-  'WyriweAttestation(bytes32 agentId,address registry,bytes32 modelHash,bytes32 rawInputHash,bytes32 sanitizationPipelineHash,bytes32 inputHash,bytes32 outputHash,uint256 timestamp)'
+  'WyriweAttestation(bytes32 agentId,address registry,bytes32 modelHash,bytes32 rawInputHash,bytes32 sanitizationPipelineHash,bytes32 inputHash,bytes32 outputHash,bytes32 commitmentHash,uint256 timestamp)'
 
 // IDENTITY_SENTINEL path: no sanitization pipeline was applied.
 // sanitizationPipelineHash is set to keccak256("IDENTITY_SENTINEL") as a well-known sentinel value.
@@ -10,14 +10,15 @@ export const ATTESTATION_TYPEHASH =
 export const IDENTITY_SENTINEL = 'IDENTITY_SENTINEL' as const
 
 export type WyriweAttestation = {
-  agentId: `0x${string}`                   // bytes32 — ERC-8004 agent identity
-  registry: `0x${string}`                  // address — on-chain registry
-  modelHash: `0x${string}`                 // bytes32 — AI model identifier
-  rawInputHash: `0x${string}`              // bytes32 — keccak256(raw calldata)
+  agentId:                  `0x${string}`  // bytes32 — ERC-8004 agent identity
+  registry:                 `0x${string}`  // address — on-chain registry
+  modelHash:                `0x${string}`  // bytes32 — AI model identifier
+  rawInputHash:             `0x${string}`  // bytes32 — keccak256(raw calldata)
   sanitizationPipelineHash: `0x${string}`  // bytes32 — sentinel or pipeline hash
-  inputHash: `0x${string}`                 // bytes32 — keccak256(sanitized input)
-  outputHash: `0x${string}`               // bytes32 — keccak256(output)
-  timestamp: bigint
+  inputHash:                `0x${string}`  // bytes32 — keccak256(sanitized input)
+  outputHash:               `0x${string}`  // bytes32 — keccak256(output)
+  commitmentHash:           `0x${string}`  // bytes32 — OCP ERC-8263 observation commitment
+  timestamp:                bigint
 }
 
 // EIP-712 type definition — passed to viem signTypedData
@@ -29,7 +30,8 @@ export const WYRIWE_TYPES = {
     { name: 'rawInputHash',              type: 'bytes32' },
     { name: 'sanitizationPipelineHash',  type: 'bytes32' },
     { name: 'inputHash',                 type: 'bytes32' },
-    { name: 'outputHash',               type: 'bytes32' },
+    { name: 'outputHash',                type: 'bytes32' },
+    { name: 'commitmentHash',            type: 'bytes32' },
     { name: 'timestamp',                 type: 'uint256' },
   ],
 } as const

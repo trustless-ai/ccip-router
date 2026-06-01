@@ -181,6 +181,19 @@ GET /records?namespace=<str>&since=<unix>&limit=<n>&cursor=<str>
   }
 ```
 
+### OCP observation commitment (ERC-8263)
+```
+GET /ocp/:inputHash
+→ {
+    inputHash,
+    found: true,
+    commitmentHash: "0x...",
+    observation: { agentId, modelHash, inputHash, outputHash, timestamp },
+    namespace, sourcePeer
+  }
+→ { inputHash, found: false }   (404 — no WYRIWE attestation for this inputHash)
+```
+
 ### Attestation lookup
 ```
 GET /verify/:inputHash
@@ -263,7 +276,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 | EIP-3668 | Transport | CCIP-Read client-to-gateway | ✅ implemented |
 | WYRIWE | L2 Input trust | Triple-hash commitment, EIP-712 attestation | ✅ implemented |
 | ERC-8004 | L1 Identity | Agent identity `agentId` + `registryAddress` in attestation | ✅ implemented |
-| OCP / ERC-8263 | L3 Observation | Observation commitment hash | 🔜 next |
+| OCP / ERC-8263 | L3 Observation | Observation commitment hash | ✅ implemented |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
 
 ---
@@ -282,10 +295,10 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] `withWyriwe()` — EIP-712 attestation, triple-hash chain, IDENTITY_SENTINEL path
 - [x] `/verify` — clean proof per namespace: `{ verified, signer, signingType, signature, attestation }`
 - [x] ERC-8004 identity — `AGENT_ID` + `REGISTRY_ADDRESS` + `CHAIN_ID`, `/identity` endpoint, `/health` field
+- [x] OCP / ERC-8263 — `commitmentHash` in `WyriweAttestation`, `/ocp/:inputHash` endpoint
 - [x] Router SVG favicon, dinamic.eth design language
 
 ### Next
-- [ ] OCP / ERC-8263 observation commitment hash in attestation
 - [ ] Peer signer pinning — reject records with unexpected signer after first sync
 - [ ] Peer health polling (dedicated `/health` fetch loop, separate from sync)
 - [ ] Graceful shutdown (SIGTERM → flush WAL)

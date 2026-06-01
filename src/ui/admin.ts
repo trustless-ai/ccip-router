@@ -318,9 +318,14 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     .warn-banner {
       background: var(--amber-l); border-bottom: 1px solid var(--amber-b);
       padding: 8px 28px; font-size: 12px; color: var(--amber);
-      display: none; align-items: center; gap: 8px;
+      display: none; align-items: center; gap: 6px; flex-wrap: wrap;
     }
-    .warn-banner a { color: var(--amber); }
+    .warn-banner a    { color: var(--amber); text-decoration: underline; }
+    .warn-banner code {
+      font-family: var(--mono); font-size: 11px;
+      background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3);
+      border-radius: 4px; padding: 1px 6px; color: var(--amber);
+    }
 
     /* ── Layout ── */
     main { max-width: 1060px; margin: 0 auto; padding: 28px 24px; }
