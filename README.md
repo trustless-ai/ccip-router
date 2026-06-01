@@ -234,9 +234,13 @@ What `withWyriwe()` adds on top of basic:
 ```bash
 npm install
 npm run dev
-# → open http://localhost:3000
-# → setup wizard walks you through key generation + config
-# → config.json is written, node restarts, /admin loads
+# → open http://localhost:3000/setup
+# → step 1: generate or import your signing key
+# → step 2: optional Bearer secret for CLI access
+# → step 3: namespace, port, sync interval
+# → step 4: confirm → config.json written, node restarts
+# → /admin/login: connect any MetaMask wallet → first signer claims admin
+# → /admin: dashboard ready
 ```
 
 Or configure via environment (no wizard needed):
@@ -278,12 +282,17 @@ Visit `/admin` after setup. Features:
 - Live stats: record count, peer count, last sync time
 - Peer panel: add/remove peers, per-peer health + signer address + last sync
 - Recent records panel: local vs peer-synced, timestamps
+- ENS records panel — add/edit/delete addr, text, contenthash records without a restart
 - Manual sync trigger
 - Auto-refresh every 15 seconds
 
-**Auth:** Sign in with Ethereum (EIP-4361 SIWE) — your browser wallet signs a message with the gateway key. The authorized signer is whoever holds `GATEWAY_PRIVATE_KEY`. For CLI / scripts: `Authorization: Bearer <ADMIN_SECRET>` still works as a fallback.
+**Auth — claim on first login (EIP-4361 SIWE):** On a fresh node the login page shows an amber "Unclaimed node" banner. Connect any browser wallet and sign once — that wallet address is saved to `config.json` as the permanent admin. Subsequent logins must match that address. Admin wallet is completely decoupled from the gateway signing key (`GATEWAY_PRIVATE_KEY` stays server-side).
 
-**Stack status row:** A compact pill row below the header shows which tiers are active — Signing / ERC-8004 / WYRIWE / OCP — derived from `/admin/api/status`. Green = active, grey = unconfigured.
+**Transfer admin:** While logged in, open the "Admin wallet" panel → Transfer. Switch MetaMask to the new wallet, sign a transfer message to prove ownership — `adminAddress` is updated live and a new session is issued, no restart required.
+
+**Bearer fallback:** `Authorization: Bearer <ADMIN_SECRET>` always works for CLI / scripts regardless of SIWE state.
+
+**Stack status row:** A compact pill row below the header shows which tiers are active — Signing / ERC-8004 / WYRIWE / OCP / VNI / On-chain — derived from `/admin/api/status`. Green = active, grey = unconfigured.
 
 **Node logs panel:** Live ring buffer of the last 200 log lines (info/warn/error), colour-coded. Auto-refreshes every 10 seconds.
 
@@ -436,19 +445,37 @@ GET /health
   }
 ```
 
-### Admin API (requires auth if ADMIN_SECRET set)
+### Admin auth (SIWE + Bearer)
 ```
-GET  /admin/api/status          node info, peers, recent records, tiers
+GET  /admin/siwe/nonce          → { nonce, domain, chainId, authorizedAddress, claimed }
+POST /admin/siwe/verify         { message, signature }
+                                  unclaimed node → first caller claims admin, saved to config.json
+                                  claimed node   → must match stored adminAddress
+                                  → { ok, address, claimed, redirect }
+POST /admin/siwe/transfer       { message, signature } — signed by NEW wallet
+                                  current session required; updates adminAddress live
+                                  → { ok, address }
+POST /admin/logout              clear session cookie
+```
+
+### Admin API (requires auth)
+```
+GET  /admin/api/status          node info, peers, recent records, tiers, adminAddress
 GET  /admin/api/logs            last 200 log lines [{ ts, level, msg }]
-GET  /admin/api/audit           per-spec compliance report (EIP-3668/WYRIWE/ERC-8004/OCP)
+GET  /admin/api/audit           per-spec compliance report (EIP-3668/WYRIWE/ERC-8004/OCP/VNI)
 POST /admin/api/sync            trigger immediate peer sync
 POST /admin/api/publish         batch-publish recent WYRIWE records to AttestationIndex
                                   body: { limit?: number }  (default 50, max 200)
                                   → { published, skipped, errors }
 POST /admin/api/peers           { url } — add peer
 DEL  /admin/api/peers           { url } — remove peer
-POST /admin/login               { secret } — set session cookie
-POST /admin/logout              clear session cookie
+GET  /admin/api/ens-records     ?name= — list ENS records
+POST /admin/api/ens-records     { name, type, coinType?, textKey?, value } — upsert
+DEL  /admin/api/ens-records     { name, type, coinType?, textKey? } — delete
+GET  /admin/api/config          safe config snapshot (never exposes private key)
+POST /admin/api/config          update config fields → writes config.json, restarts node
+POST /admin/api/key             { gatewayKey } — rotate signing key → restart
+POST /admin/api/register        register node on-chain via NodeRegistry
 ```
 
 ---
@@ -546,6 +573,12 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 **Setup wizard — node owner onboarding**
 - [x] Admin secret as dedicated step 2 — prominent warning box, two-step skip confirmation
 - [x] Post-setup checklist — signing ✓, admin ✓/⚠, WYRIWE/ERC-8004/VNI ○ with next-step hints
+- [x] Spawn-based node restart (setup + config save) — works without a process manager
+- [x] Claim-on-first-login — first MetaMask wallet to sign becomes permanent admin, no pre-configuration required
+- [x] Admin transfer — logged-in admin proves new wallet ownership via SIWE, `adminAddress` updated live with no restart
+- [x] ENS records panel — live table, add/delete addr / text / addr_coin / contenthash records, changes take effect immediately
+- [x] Admin wallet panel in dashboard — current address, two-step transfer UI
+- [x] `withEns()` — ENS wildcard resolver wrapper; DNS wire-format decode, selector dispatch (addr / addr_coin / text / contenthash), null → zero-value fallbacks, `isEnsCalldata()` guard
 
 ---
 
@@ -560,9 +593,9 @@ npm test
 Expected output:
 
 ```
-ℹ tests 49
-ℹ suites 16
-ℹ pass 49
+ℹ tests 61
+ℹ suites 22
+ℹ pass 61
 ℹ fail 0
 ```
 
@@ -572,10 +605,11 @@ Expected output:
 |---|---|
 | `src/__tests__/gateway.test.ts` | `decodeRequest` — address + calldata parsing, `.json` suffix stripping, `CcipRequestError` on bad inputs; `encodeResponse` envelope |
 | `src/__tests__/crypto.test.ts` | `signRecord` / `recoverRecordSigner` round-trip; `verifyRecord` correct signer → `true`, wrong signer / tampered value → `false` |
-| `src/__tests__/db.test.ts` | `insertRecord`, `getRecord` (with/without namespace), `getRecordsByInputHash`, `INSERT OR IGNORE` deduplication, cursor pagination, `getContributions` grouping, peer upsert + remove |
+| `src/__tests__/db.test.ts` | `insertRecord`, `getRecord` (with/without namespace), `getRecordsByInputHash`, `INSERT OR IGNORE` deduplication, cursor pagination, `getContributions` grouping, peer upsert + remove, ENS record upsert/delete/list |
 | `src/__tests__/ocp.test.ts` | `buildCommitmentHash` determinism, 32-byte hex output, field-sensitivity (agentId / outputHash / timestamp) |
 | `src/__tests__/wyriwe.test.ts` | Sentinel path (`inputHash === rawInputHash`), non-sentinel path (`keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))`), paths produce distinct hashes for same calldata |
 | `src/__tests__/vni.test.ts` | `makeVni` field shape + stable `nodeId`; `verifyVni` round-trip; tamper detection (url / signerAddress / nodeId → `null`) |
+| `src/__tests__/ens.test.ts` | DNS wire-format encode/decode round-trip; `withEns()` dispatch for all 4 record types (addr, addr_coin, text, contenthash); null → zero-value fallbacks; unknown selector → `0x`; wrong outer selector throws |
 
 Tests use `SQLiteDB(':memory:')` directly (bypassing the runtime singleton) and Hardhat dev key 0 for any signing operations — both are safe to commit and require no external services.
 
