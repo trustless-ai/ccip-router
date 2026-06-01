@@ -1723,8 +1723,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   // Canonical shared deployments — one per chain, all nodes on the same chain share these.
   // Add an entry here after deploying to a new chain so future operators can skip deployment.
   const KNOWN_DEPLOYMENTS = {
-    // example (fill in after first Sepolia deploy):
-    // 11155111: { name: 'Sepolia', attestationIndex: '0x...', nodeRegistry: '0x...' },
+    11155111: {
+      attestationIndex: '0x107D706112225aC57eCf6692FBbDC283fb6E3698',
+      nodeRegistry:     '0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7',
+    },
   }
 
   const CHAINS = [

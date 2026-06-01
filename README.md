@@ -100,9 +100,21 @@ npm run dev
 | `REGISTRY_ADDRESS` | No | — | ERC-8004 on-chain registry address. Required alongside `AGENT_ID`. |
 | `CHAIN_ID` | No | `1` | Chain where the ERC-8004 registry is deployed. |
 | `ATTESTATION_INDEX` | No | — | Deployed `AttestationIndex` contract address. Enables on-chain anchoring. |
+| `NODE_REGISTRY` | No | — | Deployed `NodeRegistry` contract address. Enables on-chain node registration. |
 | `RPC_URL` | No | — | JSON-RPC endpoint. Required alongside `ATTESTATION_INDEX`. |
+| `MODEL_HASH` | No | — | `keccak256` of model weights CID. Required to activate WYRIWE attestation. |
 
 \* Can also come from `config.json` written by the setup wizard.
+
+### Canonical contract deployments
+
+Use these shared addresses — no need to deploy your own:
+
+| Chain | AttestationIndex | NodeRegistry |
+|---|---|---|
+| Sepolia (11155111) | `0x107D706112225aC57eCf6692FBbDC283fb6E3698` | `0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7` |
+
+The admin panel's **Deploy contracts** panel auto-populates these for any chain with a canonical deployment.
 
 ---
 
