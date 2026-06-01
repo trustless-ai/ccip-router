@@ -53,47 +53,41 @@ if (config.peers.length > 0) {
   console.log('[mesh] no peers configured — running as standalone node')
 }
 
-// ---------------------------------------------------------------------------
-// Basic usage — plug in any resolver, no attestation required
-// ---------------------------------------------------------------------------
-// const ccip = new CcipRouter({
-//   namespace: 'token-metadata',
-//   db,
-//   resolver: async (sender, calldata, namespace) => {
-//     return encodeMyResponse(calldata)
-//   },
-// })
-
-// ---------------------------------------------------------------------------
-// Advanced usage — ERC-8004 identity + WYRIWE attestation (agent stack)
-// Set AGENT_ID, REGISTRY_ADDRESS, MODEL_HASH, CHAIN_ID in env or config.json
-// ---------------------------------------------------------------------------
-// const ccip = new CcipRouter({
-//   namespace:  config.syncNamespace,
-//   db,
-//   gatewayKey: config.gatewayKey,
-//   identity,   // ERC-8004 — exposes /identity, included in /health
-//   resolver: withWyriwe(myAgentResolver, {
-//     gatewayKey:      config.gatewayKey!,
-//     registryAddress: config.registryAddress!,
-//     agentId:         config.agentId!,
-//     modelHash:       process.env.MODEL_HASH as `0x${string}`,
-//     chainId:         config.chainId,
-//   }),
-// })
-
 // Build identity opts from config — passed to CcipRouter and available via /identity
 const identity = config.agentId && config.registryAddress
   ? { agentId: config.agentId, registryAddress: config.registryAddress, chainId: config.chainId }
   : undefined
 
-// Default dev resolver — returns empty bytes, useful for testing mesh sync
+// Base resolver — returns empty bytes (override for custom logic)
+const baseResolver = async (_sender: string, _calldata: `0x${string}`, _namespace: string): Promise<`0x${string}`> => '0x'
+
+// Activate full attestation pipeline when all required fields are present:
+//   GATEWAY_PRIVATE_KEY + AGENT_ID + REGISTRY_ADDRESS + MODEL_HASH
+// Without MODEL_HASH the WyriweAttestation struct is incomplete, so we fall
+// back to plain signing only.
+const wyriweActive = !!(
+  config.gatewayKey &&
+  config.agentId &&
+  config.registryAddress &&
+  config.modelHash
+)
+
+const resolver = wyriweActive
+  ? withWyriwe(baseResolver, {
+      gatewayKey:      config.gatewayKey!,
+      registryAddress: config.registryAddress!,
+      agentId:         config.agentId!,
+      modelHash:       config.modelHash!,
+      chainId:         config.chainId,
+    })
+  : baseResolver
+
 const ccip = new CcipRouter({
   namespace:  config.syncNamespace,
   db,
   gatewayKey: config.gatewayKey,
   identity,
-  resolver:   async (_sender, _calldata, _namespace) => '0x',
+  resolver,
 })
 
 // Specific named routes must be registered before the CCIP wildcard /:sender/:data
@@ -141,8 +135,8 @@ app.get('/health', async (c) => {
     tiers: {
       signed:       !!signerAddress,
       erc8004:      !!identity,
-      wyriwe:       wyriweCount > 0,
-      ocp:          wyriweCount > 0,
+      wyriwe:       wyriweActive,
+      ocp:          wyriweActive,
       vni:          !!(config.gatewayKey && config.nodeUrl),
       onChain:      !!(config.attestationIndex && config.rpcUrl),
     },
@@ -169,6 +163,7 @@ const server = serve({ fetch: app.fetch, port: config.port })
 console.log(`[ccip-router] listening on :${config.port}`)
 console.log(`[ccip-router] namespace:  ${config.syncNamespace}`)
 console.log(`[ccip-router] signing:    ${signerAddress ?? 'dry-run'}`)
+console.log(`[ccip-router] wyriwe:     ${wyriweActive ? 'active' : 'inactive (set AGENT_ID + REGISTRY_ADDRESS + MODEL_HASH to enable)'}`)
 console.log(`[ccip-router] peers:      ${config.peers.length}`)
 
 // Graceful shutdown — flush WAL and close DB before exiting

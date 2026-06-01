@@ -61,8 +61,8 @@ adminRouter.get('/api/status', async (c) => {
     tiers: {
       signed:   !!signerAddress,
       erc8004:  !!(config.agentId && config.registryAddress),
-      wyriwe:   wyriweCount > 0,
-      ocp:      wyriweCount > 0,
+      wyriwe:   !!(config.gatewayKey && config.agentId && config.registryAddress && config.modelHash),
+      ocp:      !!(config.gatewayKey && config.agentId && config.registryAddress && config.modelHash),
       vni:      !!(config.gatewayKey && config.nodeUrl),
       onChain:  !!(config.attestationIndex && config.rpcUrl),
     },
@@ -282,6 +282,7 @@ adminRouter.get('/api/config', (c) => {
     peers:            config.peers,
     agentId:          config.agentId          ?? '',
     registryAddress:  config.registryAddress  ?? '',
+    modelHash:        config.modelHash        ?? '',
     chainId:          config.chainId,
     rpcUrl:           config.rpcUrl           ?? '',
     attestationIndex: config.attestationIndex ?? '',
@@ -301,6 +302,7 @@ adminRouter.post('/api/config', async (c) => {
     peers?:            string[]
     agentId?:          string
     registryAddress?:  string
+    modelHash?:        string
     chainId?:          number
     rpcUrl?:           string
     attestationIndex?: string
@@ -325,6 +327,7 @@ adminRouter.post('/api/config', async (c) => {
     autoDiscover:     body.autoDiscover     ?? existing.autoDiscover,
     agentId:          body.agentId          || existing.agentId,
     registryAddress:  body.registryAddress  || existing.registryAddress,
+    modelHash:        body.modelHash        || existing.modelHash,
     chainId:          body.chainId          ?? existing.chainId,
     rpcUrl:           body.rpcUrl           || existing.rpcUrl,
     attestationIndex: body.attestationIndex || existing.attestationIndex,
@@ -1088,6 +1091,11 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
               <input type="text" id="cfg-registry" placeholder="0x…" style="font-family:var(--mono);font-size:11px" oninput="markDirty()"/>
             </div>
           </div>
+          <div class="cfg-field">
+            <label class="cfg-label">Model hash</label>
+            <input type="text" id="cfg-modelhash" placeholder="0x… (keccak256 of model weights CID)" style="font-family:var(--mono);font-size:11px" oninput="markDirty()"/>
+            <div class="cfg-hint">Required to activate WYRIWE attestation. keccak256 of the IPFS CID (or any stable identifier) of the model weights.</div>
+          </div>
           <div class="cfg-field" style="max-width:160px">
             <label class="cfg-label">Chain ID</label>
             <input type="number" id="cfg-chainid" min="1" oninput="markDirty()"/>
@@ -1567,6 +1575,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('cfg-peers').value        = (d.peers ?? []).join('\n')
     document.getElementById('cfg-agentid').value      = d.agentId         ?? ''
     document.getElementById('cfg-registry').value     = d.registryAddress ?? ''
+    document.getElementById('cfg-modelhash').value    = d.modelHash       ?? ''
     document.getElementById('cfg-chainid').value      = d.chainId         ?? 1
     document.getElementById('cfg-rpcurl').value       = d.rpcUrl          ?? ''
     document.getElementById('cfg-attestindex').value  = d.attestationIndex ?? ''
@@ -1607,6 +1616,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       peers,
       agentId:          document.getElementById('cfg-agentid').value.trim()       || undefined,
       registryAddress:  document.getElementById('cfg-registry').value.trim()      || undefined,
+      modelHash:        document.getElementById('cfg-modelhash').value.trim()     || undefined,
       chainId:          Number(document.getElementById('cfg-chainid').value) || 1,
       rpcUrl:           document.getElementById('cfg-rpcurl').value.trim()        || undefined,
       attestationIndex: document.getElementById('cfg-attestindex').value.trim()   || undefined,

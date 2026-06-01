@@ -13,6 +13,8 @@ export type Config = {
   agentId:         `0x${string}` | null
   registryAddress: `0x${string}` | null
   chainId:         number
+  // WYRIWE / OCP — optional, activates full attestation pipeline when combined with identity
+  modelHash:       `0x${string}` | null  // bytes32 AI model identifier (keccak256 of weights CID)
   // Phase 2 on-chain anchoring — optional
   attestationIndex: `0x${string}` | null  // deployed AttestationIndex contract
   rpcUrl:           string | null          // JSON-RPC endpoint for reads + writes
@@ -34,6 +36,7 @@ export type ConfigFile = {
   agentId?: string
   registryAddress?: string
   chainId?: number
+  modelHash?: string
   // Phase 2
   attestationIndex?: string
   rpcUrl?: string
@@ -100,6 +103,7 @@ export function loadConfig(): Config {
     AGENT_ID:            process.env.AGENT_ID            ?? file.agentId,
     REGISTRY_ADDRESS:    process.env.REGISTRY_ADDRESS    ?? file.registryAddress,
     CHAIN_ID:            process.env.CHAIN_ID            ?? String(file.chainId ?? ''),
+    MODEL_HASH:          process.env.MODEL_HASH          ?? file.modelHash,
     ATTESTATION_INDEX:   process.env.ATTESTATION_INDEX   ?? file.attestationIndex,
     RPC_URL:             process.env.RPC_URL             ?? file.rpcUrl,
     NODE_URL:            process.env.NODE_URL             ?? file.nodeUrl,
@@ -132,8 +136,12 @@ export function loadConfig(): Config {
 
   const chainId = raw.CHAIN_ID ? Number(raw.CHAIN_ID) : 1
 
+  const modelHash = raw.MODEL_HASH?.trim()
+    ? requireHex('MODEL_HASH', raw.MODEL_HASH.trim())
+    : null
+
   if (agentId) {
-    console.log(`[config] identity:  agentId=${agentId.slice(0, 10)}... registry=${registryAddress ?? 'unset'} chainId=${chainId}`)
+    console.log(`[config] identity:  agentId=${agentId.slice(0, 10)}... registry=${registryAddress ?? 'unset'} chainId=${chainId} modelHash=${modelHash ? modelHash.slice(0, 10) + '...' : 'unset'}`)
   }
 
   const attestationIndex = raw.ATTESTATION_INDEX?.trim()
@@ -167,6 +175,7 @@ export function loadConfig(): Config {
     agentId,
     registryAddress,
     chainId,
+    modelHash,
     attestationIndex,
     rpcUrl,
     nodeUrl,
