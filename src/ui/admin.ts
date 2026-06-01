@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
+import { writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { privateKeyToAccount } from 'viem/accounts'
-import { getConfig } from '../config.js'
+import { getConfig, CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
 import { getDB } from '../db/index.js'
 import { syncAll } from '../mesh/sync.js'
 import { getLogs } from '../log.js'
@@ -264,6 +265,80 @@ adminRouter.delete('/api/peers', async (c) => {
   const { url } = await c.req.json<{ url: string }>()
   if (!url) return c.json({ error: 'url required' }, 400)
   await getDB().removePeer(url)
+  return c.json({ ok: true })
+})
+
+adminRouter.get('/api/config', (c) => {
+  const config = getConfig()
+  const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
+  return c.json({
+    signerAddress,
+    namespace:        config.syncNamespace,
+    syncInterval:     config.syncInterval,
+    port:             config.port,
+    dbPath:           config.dbPath,
+    nodeUrl:          config.nodeUrl          ?? '',
+    autoDiscover:     config.autoDiscover,
+    peers:            config.peers,
+    agentId:          config.agentId          ?? '',
+    registryAddress:  config.registryAddress  ?? '',
+    chainId:          config.chainId,
+    rpcUrl:           config.rpcUrl           ?? '',
+    attestationIndex: config.attestationIndex ?? '',
+    nodeRegistry:     config.nodeRegistry     ?? '',
+    hasAdminSecret:   !!config.adminSecret,
+  })
+})
+
+adminRouter.post('/api/config', async (c) => {
+  const body = await c.req.json<{
+    namespace?:        string
+    syncInterval?:     string
+    port?:             number
+    dbPath?:           string
+    nodeUrl?:          string
+    autoDiscover?:     boolean
+    peers?:            string[]
+    agentId?:          string
+    registryAddress?:  string
+    chainId?:          number
+    rpcUrl?:           string
+    attestationIndex?: string
+    nodeRegistry?:     string
+    adminSecret?:      string
+  }>()
+
+  let existing: ConfigFile = {}
+  if (existsSync(CONFIG_FILE_PATH)) {
+    try { existing = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile } catch {}
+  }
+
+  const config: ConfigFile = {
+    gatewayKey:       existing.gatewayKey,
+    adminSecret:      body.adminSecret?.trim() || existing.adminSecret,
+    namespace:        body.namespace        || existing.namespace,
+    syncInterval:     body.syncInterval     || existing.syncInterval,
+    dbPath:           body.dbPath           || existing.dbPath,
+    port:             body.port             ?? existing.port,
+    peers:            body.peers            ?? existing.peers ?? [],
+    nodeUrl:          body.nodeUrl          || existing.nodeUrl,
+    autoDiscover:     body.autoDiscover     ?? existing.autoDiscover,
+    agentId:          body.agentId          || existing.agentId,
+    registryAddress:  body.registryAddress  || existing.registryAddress,
+    chainId:          body.chainId          ?? existing.chainId,
+    rpcUrl:           body.rpcUrl           || existing.rpcUrl,
+    attestationIndex: body.attestationIndex || existing.attestationIndex,
+    nodeRegistry:     body.nodeRegistry     || existing.nodeRegistry,
+  }
+
+  try {
+    writeFileSync(CONFIG_FILE_PATH, JSON.stringify(config, null, 2), 'utf8')
+  } catch (err) {
+    return c.json({ error: `Could not write config: ${String(err)}` }, 500)
+  }
+
+  console.log('[config] updated via admin panel — restarting')
+  setTimeout(() => process.exit(0), 500)
   return c.json({ ok: true })
 })
 
@@ -705,6 +780,71 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       backdrop-filter: blur(12px);
     }
     .toast.show { opacity: 1; transform: translateY(0); }
+
+    /* ── Node config panel ── */
+    .config-form { padding: 20px 18px; }
+    .config-section { margin-bottom: 24px; }
+    .config-section-title {
+      font-size: 10px; color: var(--muted); text-transform: uppercase;
+      letter-spacing: 0.8px; font-weight: 500;
+      margin-bottom: 12px; padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .cfg-field { margin-bottom: 14px; }
+    .cfg-field:last-child { margin-bottom: 0; }
+    .cfg-label {
+      display: block; font-size: 11px; font-weight: 500;
+      color: var(--subtle); margin-bottom: 6px;
+      text-transform: uppercase; letter-spacing: 0.6px;
+    }
+    .cfg-field input[type=text],
+    .cfg-field input[type=number],
+    .cfg-field input[type=password],
+    .cfg-field textarea {
+      width: 100%; background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border); border-radius: 9px;
+      color: var(--text); font-size: 12px; font-family: inherit;
+      padding: 9px 12px; outline: none; transition: border-color 0.15s;
+    }
+    .cfg-field input:focus, .cfg-field textarea:focus { border-color: rgba(99,102,241,0.5); }
+    .cfg-field textarea { min-height: 72px; resize: vertical; font-family: var(--mono); }
+    .cfg-hint { font-size: 11px; color: var(--muted); margin-top: 5px; font-weight: 300; }
+    .cfg-readonly {
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+      border-radius: 9px; padding: 9px 12px;
+      font-family: var(--mono); font-size: 12px; color: var(--muted);
+    }
+    .cfg-readonly a {
+      font-size: 11px; color: var(--accent); text-decoration: none;
+      flex-shrink: 0; margin-left: 12px;
+    }
+    .cfg-readonly a:hover { color: var(--accent-v); }
+    .cfg-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 640px) { .cfg-row-2 { grid-template-columns: 1fr; } }
+    .cfg-toggle {
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+      border-radius: 9px; padding: 9px 12px;
+    }
+    .cfg-toggle-label { font-size: 12px; color: rgba(255,255,255,0.6); }
+    .toggle-switch {
+      position: relative; width: 36px; height: 20px;
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: 10px; cursor: pointer; transition: all 0.2s; flex-shrink: 0;
+    }
+    .toggle-switch.on  { background: var(--accent); border-color: var(--accent); }
+    .toggle-switch::after {
+      content: ''; position: absolute;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--muted); top: 2px; left: 2px; transition: all 0.2s;
+    }
+    .toggle-switch.on::after { background: #fff; left: 18px; }
+    .config-actions {
+      display: flex; align-items: center; justify-content: space-between;
+      padding-top: 18px; border-top: 1px solid var(--border);
+    }
+    .config-actions .note { font-size: 11px; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -810,6 +950,129 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="audit-panel" id="config-panel" style="margin-top:16px">
+    <div class="audit-header" id="config-header" onclick="toggleConfig()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="panel-title">Node config</div>
+        <span id="config-dirty" style="display:none;font-size:10px;background:var(--amber-l);border:1px solid var(--amber-b);color:var(--amber);border-radius:4px;padding:1px 7px">unsaved</span>
+      </div>
+      <span class="audit-chevron" id="config-chevron">▼</span>
+    </div>
+    <div id="config-body" style="display:none">
+      <div class="config-form">
+
+        <div class="config-section">
+          <div class="config-section-title">Core</div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">Namespace</label>
+              <input type="text" id="cfg-namespace" oninput="markDirty()"/>
+              <div class="cfg-hint">Peers must share this namespace to sync.</div>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">Sync interval</label>
+              <input type="text" id="cfg-interval" style="font-family:var(--mono)" oninput="markDirty()"/>
+              <div class="cfg-hint">Cron expression.</div>
+            </div>
+          </div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">Port</label>
+              <input type="number" id="cfg-port" min="1" max="65535" oninput="markDirty()"/>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">DB path</label>
+              <input type="text" id="cfg-dbpath" style="font-family:var(--mono)" oninput="markDirty()"/>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Signing</div>
+          <div class="cfg-field">
+            <label class="cfg-label">Signer address</label>
+            <div class="cfg-readonly">
+              <span id="cfg-signer">—</span>
+              <a href="/setup">Rotate key → setup wizard</a>
+            </div>
+            <div class="cfg-hint">Key is write-once. Use the setup wizard to rotate it safely.</div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Network</div>
+          <div class="cfg-field">
+            <label class="cfg-label">Node URL</label>
+            <input type="text" id="cfg-nodeurl" placeholder="https://my-node.example.com" oninput="markDirty()"/>
+            <div class="cfg-hint">This node's public URL. Required for VNI and peer gossip.</div>
+          </div>
+          <div class="cfg-field">
+            <label class="cfg-label">Auto-discover peers</label>
+            <div class="cfg-toggle">
+              <span class="cfg-toggle-label">Pull peer lists from synced peers automatically</span>
+              <div class="toggle-switch" id="toggle-autodiscover" onclick="toggleAutoDiscover()"></div>
+            </div>
+          </div>
+          <div class="cfg-field">
+            <label class="cfg-label">Seed peers</label>
+            <textarea id="cfg-peers" placeholder="https://gateway-b.example.com&#10;https://gateway-c.example.com" oninput="markDirty()"></textarea>
+            <div class="cfg-hint">One URL per line. Re-seeded into DB on startup — runtime peers are managed from the Peers panel above.</div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Identity — ERC-8004</div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">Agent ID</label>
+              <input type="text" id="cfg-agentid" placeholder="0x…" style="font-family:var(--mono);font-size:11px" oninput="markDirty()"/>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">Registry address</label>
+              <input type="text" id="cfg-registry" placeholder="0x…" style="font-family:var(--mono);font-size:11px" oninput="markDirty()"/>
+            </div>
+          </div>
+          <div class="cfg-field" style="max-width:160px">
+            <label class="cfg-label">Chain ID</label>
+            <input type="number" id="cfg-chainid" min="1" oninput="markDirty()"/>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Chain — on-chain anchoring</div>
+          <div class="cfg-field">
+            <label class="cfg-label">RPC URL</label>
+            <input type="text" id="cfg-rpcurl" placeholder="https://mainnet.infura.io/v3/…" oninput="markDirty()"/>
+          </div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">AttestationIndex</label>
+              <input type="text" id="cfg-attestindex" placeholder="0x…" style="font-family:var(--mono);font-size:11px" oninput="markDirty()"/>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">NodeRegistry</label>
+              <input type="text" id="cfg-noderegistry" placeholder="0x…" style="font-family:var(--mono);font-size:11px" oninput="markDirty()"/>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Admin access</div>
+          <div class="cfg-field">
+            <label class="cfg-label">Admin secret</label>
+            <input type="password" id="cfg-adminsecret" placeholder="Leave blank to keep existing" oninput="markDirty()"/>
+            <div class="cfg-hint">Enter a new value to rotate the secret. Leave blank to keep the current one.</div>
+          </div>
+        </div>
+
+        <div class="config-actions">
+          <span class="note">All changes require a node restart.</span>
+          <button class="btn btn-primary btn-sm" id="btn-cfg-save" onclick="saveConfig()">Save &amp; restart →</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
 
 </main>
 
@@ -1060,6 +1323,99 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     chevron.className   = 'audit-chevron' + (auditOpen ? ' open' : '')
     header.className    = 'audit-header'  + (auditOpen ? ' open' : '')
     if (auditOpen && !auditLoaded) loadAudit()
+  }
+
+  // ── Node config panel ──────────────────────────────────────────────────────
+
+  let configLoaded = false
+  let configOpen   = false
+  let configDirty  = false
+  let autoDiscover = true
+
+  function toggleConfig() {
+    configOpen = !configOpen
+    const body    = document.getElementById('config-body')
+    const chevron = document.getElementById('config-chevron')
+    const header  = document.getElementById('config-header')
+    body.style.display = configOpen ? 'block' : 'none'
+    chevron.className  = 'audit-chevron' + (configOpen ? ' open' : '')
+    header.className   = 'audit-header'  + (configOpen ? ' open' : '')
+    if (configOpen && !configLoaded) fetchConfig()
+  }
+
+  async function fetchConfig() {
+    const res = await fetch('/admin/api/config')
+    if (!res.ok) return
+    const d = await res.json()
+
+    document.getElementById('cfg-namespace').value    = d.namespace       ?? ''
+    document.getElementById('cfg-interval').value     = d.syncInterval    ?? ''
+    document.getElementById('cfg-port').value         = d.port            ?? 3000
+    document.getElementById('cfg-dbpath').value       = d.dbPath          ?? ''
+    document.getElementById('cfg-signer').textContent = d.signerAddress   ?? 'dry-run'
+    document.getElementById('cfg-nodeurl').value      = d.nodeUrl         ?? ''
+    document.getElementById('cfg-peers').value        = (d.peers ?? []).join('\n')
+    document.getElementById('cfg-agentid').value      = d.agentId         ?? ''
+    document.getElementById('cfg-registry').value     = d.registryAddress ?? ''
+    document.getElementById('cfg-chainid').value      = d.chainId         ?? 1
+    document.getElementById('cfg-rpcurl').value       = d.rpcUrl          ?? ''
+    document.getElementById('cfg-attestindex').value  = d.attestationIndex ?? ''
+    document.getElementById('cfg-noderegistry').value = d.nodeRegistry    ?? ''
+
+    autoDiscover = d.autoDiscover ?? true
+    document.getElementById('toggle-autodiscover').className = 'toggle-switch' + (autoDiscover ? ' on' : '')
+
+    configLoaded = true
+    configDirty  = false
+    document.getElementById('config-dirty').style.display = 'none'
+  }
+
+  function toggleAutoDiscover() {
+    autoDiscover = !autoDiscover
+    document.getElementById('toggle-autodiscover').className = 'toggle-switch' + (autoDiscover ? ' on' : '')
+    markDirty()
+  }
+
+  function markDirty() {
+    if (!configLoaded) return
+    configDirty = true
+    document.getElementById('config-dirty').style.display = 'inline'
+  }
+
+  async function saveConfig() {
+    const btn    = document.getElementById('btn-cfg-save')
+    btn.disabled = true; btn.textContent = 'Saving...'
+    const peers  = document.getElementById('cfg-peers').value
+      .split('\n').map(s => s.trim()).filter(Boolean)
+    const payload = {
+      namespace:        document.getElementById('cfg-namespace').value.trim(),
+      syncInterval:     document.getElementById('cfg-interval').value.trim(),
+      port:             Number(document.getElementById('cfg-port').value),
+      dbPath:           document.getElementById('cfg-dbpath').value.trim(),
+      nodeUrl:          document.getElementById('cfg-nodeurl').value.trim()       || undefined,
+      autoDiscover,
+      peers,
+      agentId:          document.getElementById('cfg-agentid').value.trim()       || undefined,
+      registryAddress:  document.getElementById('cfg-registry').value.trim()      || undefined,
+      chainId:          Number(document.getElementById('cfg-chainid').value) || 1,
+      rpcUrl:           document.getElementById('cfg-rpcurl').value.trim()        || undefined,
+      attestationIndex: document.getElementById('cfg-attestindex').value.trim()   || undefined,
+      nodeRegistry:     document.getElementById('cfg-noderegistry').value.trim()  || undefined,
+      adminSecret:      document.getElementById('cfg-adminsecret').value.trim()   || undefined,
+    }
+    const res  = await fetch('/admin/api/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      btn.disabled = false; btn.textContent = 'Save & restart →'
+      toast('✕ ' + (data.error || 'Save failed'))
+      return
+    }
+    btn.textContent = 'Restarting...'
+    toast('Config saved — restarting node')
+    setTimeout(() => { window.location.href = '/admin' }, 4500)
   }
 
   load()

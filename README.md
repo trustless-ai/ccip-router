@@ -368,8 +368,10 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [ ] Toast-based error feedback in add-peer form (replaces `alert()`)
 
 **Node config panel** *(in-dashboard, no env editing required)*
-- [ ] Editable node settings panel — namespace, sync interval, `NODE_URL`, `AUTO_DISCOVER` toggle
-- [ ] Live config reload without restart (`SIGHUP` or `/admin/api/reload` endpoint)
+- [x] Full config panel — Core / Signing / Network / Identity / Chain / Admin sections
+- [x] `GET /admin/api/config` — safe config snapshot (signer address, never the key)
+- [x] `POST /admin/api/config` — writes `config.json`, preserves gateway key, restarts node
+- [x] Auto-discover toggle, seed peers textarea, unsaved-changes indicator
 
 **Wallet & signing**
 - [ ] Signing key management in admin — rotate gateway key, show current signer address + key fingerprint
