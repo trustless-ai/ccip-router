@@ -1,0 +1,168 @@
+import { test, describe, beforeEach } from 'node:test'
+import assert from 'node:assert/strict'
+import { SQLiteDB } from '../db/sqlite.js'
+import type { MeshRecord } from '../db/types.js'
+
+function makeDB() {
+  return new SQLiteDB(':memory:')
+}
+
+function makeRecord(overrides: Partial<MeshRecord> = {}): MeshRecord {
+  return {
+    inputHash:  '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    namespace:  'test-ns',
+    key:        '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    value:      '0xdeadbeef',
+    timestamp:  1_700_000_000,
+    signature:  '0x' + 'cc'.repeat(65),
+    sourcePeer: null,
+    ...overrides,
+  }
+}
+
+describe('insertRecord + getRecord', () => {
+  test('inserts and retrieves a record by inputHash', async () => {
+    const db = makeDB()
+    const rec = makeRecord()
+    await db.insertRecord(rec)
+    const found = await db.getRecord(rec.inputHash)
+    assert.ok(found)
+    assert.equal(found.inputHash, rec.inputHash)
+    assert.equal(found.namespace, rec.namespace)
+    db.close()
+  })
+
+  test('getRecord with namespace does exact-match lookup', async () => {
+    const db = makeDB()
+    await db.insertRecord(makeRecord({ namespace: 'ns-a' }))
+    await db.insertRecord(makeRecord({ namespace: 'ns-b' }))
+
+    const hash = makeRecord().inputHash
+    const a = await db.getRecord(hash, 'ns-a')
+    const b = await db.getRecord(hash, 'ns-b')
+    assert.equal(a?.namespace, 'ns-a')
+    assert.equal(b?.namespace, 'ns-b')
+    db.close()
+  })
+
+  test('getRecord returns null for unknown hash', async () => {
+    const db = makeDB()
+    const result = await db.getRecord('0x' + '00'.repeat(32))
+    assert.equal(result, null)
+    db.close()
+  })
+})
+
+describe('deduplication (INSERT OR IGNORE)', () => {
+  test('same (inputHash, namespace) is inserted once', async () => {
+    const db = makeDB()
+    const rec = makeRecord()
+    await db.insertRecord(rec)
+    await db.insertRecord(rec)
+    const count = await db.recordCount(rec.namespace)
+    assert.equal(count, 1)
+    db.close()
+  })
+
+  test('same inputHash with different namespace creates two records', async () => {
+    const db = makeDB()
+    await db.insertRecord(makeRecord({ namespace: 'ns-a' }))
+    await db.insertRecord(makeRecord({ namespace: 'ns-b' }))
+    const a = await db.recordCount('ns-a')
+    const b = await db.recordCount('ns-b')
+    assert.equal(a, 1)
+    assert.equal(b, 1)
+    db.close()
+  })
+})
+
+describe('getRecordsByInputHash', () => {
+  test('returns all records for a given inputHash across namespaces', async () => {
+    const db = makeDB()
+    await db.insertRecord(makeRecord({ namespace: 'ns-a' }))
+    await db.insertRecord(makeRecord({ namespace: 'ns-b' }))
+    await db.insertRecord(makeRecord({ namespace: 'ns-c' }))
+    const recs = await db.getRecordsByInputHash(makeRecord().inputHash)
+    assert.equal(recs.length, 3)
+    db.close()
+  })
+
+  test('returns empty array for unknown hash', async () => {
+    const db = makeDB()
+    const recs = await db.getRecordsByInputHash('0x' + '00'.repeat(32))
+    assert.deepEqual(recs, [])
+    db.close()
+  })
+})
+
+describe('getRecordsSince + cursor pagination', () => {
+  test('returns records after a given timestamp', async () => {
+    const db = makeDB()
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'aa'.repeat(32), timestamp: 1000 }))
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'bb'.repeat(32), timestamp: 2000 }))
+    const recs = await db.getRecordsSince('test-ns', 1500, 100)
+    assert.equal(recs.length, 1)
+    assert.equal(recs[0].timestamp, 2000)
+    db.close()
+  })
+
+  test('cursor skips already-seen records', async () => {
+    const db = makeDB()
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'aa'.repeat(32), timestamp: 1000 }))
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'bb'.repeat(32), timestamp: 2000 }))
+
+    const page1 = await db.getRecordsSince('test-ns', 0, 1)
+    assert.equal(page1.length, 1)
+    const cursor = `${page1[0].timestamp}|${page1[0].inputHash}`
+
+    const page2 = await db.getRecordsSince('test-ns', 0, 1, cursor)
+    assert.equal(page2.length, 1)
+    assert.notEqual(page2[0].inputHash, page1[0].inputHash)
+    db.close()
+  })
+})
+
+describe('getContributions', () => {
+  test('groups records by sourcePeer', async () => {
+    const db = makeDB()
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'a1'.repeat(32), sourcePeer: 'http://peer-a' }))
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'a2'.repeat(32), sourcePeer: 'http://peer-a' }))
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'b1'.repeat(32), sourcePeer: 'http://peer-b' }))
+    await db.insertRecord(makeRecord({ inputHash: '0x' + 'local'.repeat(12) + '00'.repeat(8), sourcePeer: null }))
+
+    const contributions = await db.getContributions('test-ns')
+    const byPeer = Object.fromEntries(contributions.map((c) => [c.sourcePeer ?? 'local', c.count]))
+
+    assert.equal(byPeer['http://peer-a'], 2)
+    assert.equal(byPeer['http://peer-b'], 1)
+    assert.equal(byPeer['local'], 1)
+    db.close()
+  })
+})
+
+describe('peer operations', () => {
+  test('upsert inserts and updates a peer', async () => {
+    const db = makeDB()
+    await db.upsertPeer({ url: 'http://peer-1', lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
+    let peers = await db.getPeers()
+    assert.equal(peers.length, 1)
+    assert.equal(peers[0].url, 'http://peer-1')
+
+    await db.upsertPeer({ url: 'http://peer-1', lastSyncAt: 9999, healthy: false, nodeVersion: '0.1.0', signerAddress: '0xabc' })
+    peers = await db.getPeers()
+    assert.equal(peers.length, 1)
+    assert.equal(peers[0].lastSyncAt, 9999)
+    assert.equal(peers[0].healthy, false)
+    assert.equal(peers[0].nodeVersion, '0.1.0')
+    db.close()
+  })
+
+  test('removePeer deletes a peer', async () => {
+    const db = makeDB()
+    await db.upsertPeer({ url: 'http://peer-x', lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
+    await db.removePeer('http://peer-x')
+    const peers = await db.getPeers()
+    assert.equal(peers.length, 0)
+    db.close()
+  })
+})

@@ -357,8 +357,61 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] ERC-8275 economics (MVP) — contribution attribution via `getContributions(namespace)`; `GET /contributions`; per-peer record counts surfaced in spec audit panel
 - [x] Config: `NODE_URL`, `NODE_REGISTRY`, `AUTO_DISCOVER`; `/health` exposes `tiers.vni` + `tiers.onChain`
 
-### Next
-- [ ] UI & accessibility polish
+### Next — UI & node management
+
+**Stack status bar**
+- [ ] Add VNI + On-chain tier pills (tiers exist in API response, never rendered)
+- [ ] Click signer address pill to copy to clipboard
+
+**Node info & layout**
+- [ ] Move node info bar (Signer / Interval / Version) above the peers/records panels
+- [ ] Toast-based error feedback in add-peer form (replaces `alert()`)
+
+**Node config panel** *(in-dashboard, no env editing required)*
+- [ ] Editable node settings panel — namespace, sync interval, `NODE_URL`, `AUTO_DISCOVER` toggle
+- [ ] Live config reload without restart (`SIGHUP` or `/admin/api/reload` endpoint)
+
+**Wallet & signing**
+- [ ] Signing key management in admin — rotate gateway key, show current signer address + key fingerprint
+- [ ] Key import via paste (hex) or generated fresh — writes to `config.json`, node picks up on next request
+- [ ] Dry-run indicator when no key is configured — clear call to action to generate/import
+
+**Setup wizard — node owner onboarding**
+- [ ] Admin secret step during first install — mandatory field, no more open dashboard by default
+- [ ] Signing key step — generate or paste; shown alongside what it protects (records, mesh identity)
+- [ ] Post-setup checklist — shows which tiers are active and what's still missing (links to spec audit)
+
+---
+
+## Testing
+
+The test suite uses the Node.js built-in test runner (`node:test`) with `tsx` for ESM TypeScript — no extra test framework required.
+
+```bash
+npm test
+```
+
+Expected output:
+
+```
+ℹ tests 49
+ℹ suites 16
+ℹ pass 49
+ℹ fail 0
+```
+
+### What is tested
+
+| File | Coverage |
+|---|---|
+| `src/__tests__/gateway.test.ts` | `decodeRequest` — address + calldata parsing, `.json` suffix stripping, `CcipRequestError` on bad inputs; `encodeResponse` envelope |
+| `src/__tests__/crypto.test.ts` | `signRecord` / `recoverRecordSigner` round-trip; `verifyRecord` correct signer → `true`, wrong signer / tampered value → `false` |
+| `src/__tests__/db.test.ts` | `insertRecord`, `getRecord` (with/without namespace), `getRecordsByInputHash`, `INSERT OR IGNORE` deduplication, cursor pagination, `getContributions` grouping, peer upsert + remove |
+| `src/__tests__/ocp.test.ts` | `buildCommitmentHash` determinism, 32-byte hex output, field-sensitivity (agentId / outputHash / timestamp) |
+| `src/__tests__/wyriwe.test.ts` | Sentinel path (`inputHash === rawInputHash`), non-sentinel path (`keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))`), paths produce distinct hashes for same calldata |
+| `src/__tests__/vni.test.ts` | `makeVni` field shape + stable `nodeId`; `verifyVni` round-trip; tamper detection (url / signerAddress / nodeId → `null`) |
+
+Tests use `SQLiteDB(':memory:')` directly (bypassing the runtime singleton) and Hardhat dev key 0 for any signing operations — both are safe to commit and require no external services.
 
 ---
 

@@ -58,10 +58,12 @@ adminRouter.get('/api/status', async (c) => {
     protected: !!config.adminSecret,
     records: count,
     tiers: {
-      signed:  !!signerAddress,
-      erc8004: !!(config.agentId && config.registryAddress),
-      wyriwe:  wyriweCount > 0,
-      ocp:     wyriweCount > 0,
+      signed:   !!signerAddress,
+      erc8004:  !!(config.agentId && config.registryAddress),
+      wyriwe:   wyriweCount > 0,
+      ocp:      wyriweCount > 0,
+      vni:      !!(config.gatewayKey && config.nodeUrl),
+      onChain:  !!(config.attestationIndex && config.rpcUrl),
     },
     peers: peers.map((p) => ({
       url: p.url, healthy: p.healthy,
@@ -731,9 +733,21 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   <span class="tier-pill off" id="tier-erc8004"><span class="tp-dot"></span>ERC-8004</span>
   <span class="tier-pill off" id="tier-wyriwe"><span class="tp-dot"></span>WYRIWE</span>
   <span class="tier-pill off" id="tier-ocp"><span class="tp-dot"></span>OCP</span>
+  <span class="tier-pill off" id="tier-vni"><span class="tp-dot"></span>VNI</span>
+  <span class="tier-pill off" id="tier-onchain"><span class="tp-dot"></span>On-chain</span>
 </div>
 
 <main>
+
+  <div class="node-bar" id="node-bar" style="display:none">
+    <div class="ninfo-item"><div class="lbl">Signer</div><div class="val" id="ni-addr">—</div></div>
+    <div class="ninfo-item"><div class="lbl">Namespace</div><div class="val" id="ni-ns">—</div></div>
+    <div class="ninfo-item"><div class="lbl">Interval</div><div class="val" id="ni-interval">—</div></div>
+    <div class="ninfo-item"><div class="lbl">Version</div><div class="val" id="ni-version">—</div></div>
+    <div style="margin-left:auto; display:flex; gap:8px">
+      <a href="/setup" class="btn btn-ghost btn-sm">⚙ Reconfigure</a>
+    </div>
+  </div>
 
   <div class="stats">
     <div class="stat">
@@ -796,14 +810,6 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
-  <div class="node-bar" id="node-bar" style="display:none">
-    <div class="ninfo-item"><div class="lbl">Signer</div><div class="val" id="ni-addr">—</div></div>
-    <div class="ninfo-item"><div class="lbl">Interval</div><div class="val" id="ni-interval">—</div></div>
-    <div class="ninfo-item"><div class="lbl">Version</div><div class="val" id="ni-version">—</div></div>
-    <div style="margin-left:auto; display:flex; gap:8px">
-      <a href="/setup" class="btn btn-ghost btn-sm">⚙ Reconfigure</a>
-    </div>
-  </div>
 
 </main>
 
@@ -877,6 +883,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     renderRecords(d.recent)
 
     document.getElementById('ni-addr').textContent     = d.signerAddress || 'dry-run'
+    document.getElementById('ni-ns').textContent       = d.namespace
     document.getElementById('ni-interval').textContent = d.syncInterval
     document.getElementById('ni-version').textContent  = d.version
     document.getElementById('node-bar').style.display  = 'flex'
@@ -897,6 +904,8 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       setTier('tier-erc8004', d.tiers.erc8004)
       setTier('tier-wyriwe',  d.tiers.wyriwe)
       setTier('tier-ocp',     d.tiers.ocp)
+      setTier('tier-vni',     d.tiers.vni)
+      setTier('tier-onchain', d.tiers.onChain)
     }
   }
 
@@ -917,7 +926,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }),
     })
     if (res.ok) { input.value = ''; await load(); toast('Peer added') }
-    else { const d = await res.json(); alert(d.error || 'Failed') }
+    else { const d = await res.json(); toast('✕ ' + (d.error || 'Failed to add peer')) }
   }
 
   async function removePeer(url) {
