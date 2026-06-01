@@ -581,6 +581,27 @@ Tests use `SQLiteDB(':memory:')` directly (bypassing the runtime singleton) and 
 
 ---
 
+## Roadmap
+
+### v0.3.0 — IPFS browser resolution
+Native ENS browsers (Brave, eth.link) resolve `contenthash` directly on-chain — they don't follow CCIP-Read. v0.3.0 will add an **IPFS + Browser resolution** admin panel that closes this gap:
+
+- Pin a file or CID to IPFS (via Pinata) from the admin panel
+- Set the resulting CID as the ENS name's `contenthash` on-chain (MetaMask, no stored key)
+- Manage multiple names from one panel
+
+Combined with `withEns()` (CCIP-Read, dynamic records) this makes the gateway handle both resolution paths:
+
+| Path | Who | How |
+|---|---|---|
+| Static pages | Brave / native ENS browsers | `contenthash` on-chain → IPFS |
+| Dynamic data | dapps / smart contracts | `offchainLookup` → CCIP-Read → `withEns()` |
+
+### v0.4.0+ — Phase 2 / Phase 3
+See [GATEWAY_DECENTRALIZATION_PLAN.md](https://github.com/Echo-Merlini/ccip-router) for the full decentralisation roadmap (chain as source of truth, incentivised node network).
+
+---
+
 ## Related
 
 - [ens-boiler](https://github.com/Echo-Merlini/ens-boiler) — opinionated ENS agent stack built on `ccip-router`
