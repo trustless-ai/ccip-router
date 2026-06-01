@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import type { Config } from '../config.js'
 import type { DB } from '../db/types.js'
 import { hashCalldata, signRecord } from '../crypto/index.js'
+import { decodeRequest, encodeResponse, CcipRequestError } from '../gateway/eip3668.js'
 
 // The function the operator supplies — all resolver logic lives here.
 // ccip-router owns: CCIP-Read decode, record writing, mesh sync.
@@ -36,27 +38,34 @@ export class CcipRouter {
   // e.g. app.route('/', router.hono())
   hono(): Hono {
     const app = new Hono()
-    app.get('/:sender/:data', async (c) => {
-      const sender = c.req.param('sender') as `0x${string}`
-      // strip trailing .json if present (EIP-3668 clients append it)
-      const raw = c.req.param('data').replace(/\.json$/, '')
-      const calldata = (raw.startsWith('0x') ? raw : `0x${raw}`) as `0x${string}`
 
-      let response: `0x${string}`
+    // EIP-3668 gateways are called directly from browser clients
+    app.use('*', cors({ origin: '*', allowMethods: ['GET'] }))
+
+    app.get('/:sender/:data', async (c) => {
+      let req: ReturnType<typeof decodeRequest>
       try {
-        response = await this.resolver(sender, calldata, this.namespace)
+        req = decodeRequest(c.req.param('sender'), c.req.param('data'))
+      } catch (err) {
+        if (err instanceof CcipRequestError) {
+          return c.json({ error: err.message }, err.status)
+        }
+        return c.json({ error: 'bad request' }, 400)
+      }
+
+      let result: `0x${string}`
+      try {
+        result = await this.resolver(req.sender, req.calldata, this.namespace)
       } catch (err) {
         return c.json({ error: 'resolver error', detail: String(err) }, 500)
       }
 
-      // write record to DB for mesh sync — fire and forget, never block the response
-      if (this.db) {
-        this.writeRecord(calldata, response).catch(() => {})
-      }
+      // fire-and-forget — never block the CCIP response on DB write
+      this.writeRecord(req.calldata, result).catch((err) =>
+        console.error('[ccip-router] writeRecord failed:', err)
+      )
 
-      // EIP-3668 response: ABI-encoded (bytes)
-      // TODO: wrap `response` in ABI encoding via viem encodeFunctionResult
-      return c.json({ data: response })
+      return c.json(encodeResponse(result))
     })
 
     return app
