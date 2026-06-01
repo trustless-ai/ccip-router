@@ -8,6 +8,106 @@ No ENS required. No agents required. Any CCIP-Read project can plug in a resolve
 
 ---
 
+## Architecture
+
+### System overview
+
+```mermaid
+flowchart LR
+    Client(["CCIP-Read client\nbrowser / contract"])
+
+    subgraph Node["ccip-router node"]
+        Handler["GET /{sender}/{data}.json\nEIP-3668 handler"]
+        Resolver["Resolver fn\ncustom logic"]
+        Wyriwe["withWyriwe()\nEIP-712 attestation"]
+        DB[("SQLite\nWAL · dedup · cursor")]
+        Cron["sync cron\n*/5 * * * *"]
+    end
+
+    subgraph Peers["Peer mesh"]
+        NodeB["Node B"]
+        NodeC["Node C"]
+    end
+
+    subgraph Sepolia["Sepolia (chain 11155111)"]
+        AI["AttestationIndex\n0x107D…3698"]
+        NR["NodeRegistry\n0x6be4…42b7"]
+    end
+
+    Client -- "EIP-3668 request" --> Handler
+    Handler -- "{ data: 0x... }" --> Client
+    Handler --> Resolver --> Wyriwe --> DB
+    Cron -- "GET /records" --> NodeB & NodeC
+    NodeB & NodeC -- "signed records" --> DB
+    DB -. "publishAttestation()" .-> AI
+    DB -. "register(url, sig)" .-> NR
+```
+
+### Per-request attestation flow
+
+```mermaid
+sequenceDiagram
+    participant Client as CCIP-Read client
+    participant GW as ccip-router
+    participant Res as Resolver fn
+    participant DB as SQLite
+    participant Chain as AttestationIndex
+
+    Client->>GW: GET /{sender}/{data}.json
+    GW->>Res: resolve(sender, calldata, namespace)
+    Res-->>GW: response bytes
+
+    Note over GW: withWyriwe() — attestation pipeline
+    GW->>GW: rawInputHash = keccak256(calldata)
+    GW->>GW: inputHash = rawInputHash (sentinel)<br/>or keccak256(abi.encode(raw, pipelineHash))
+    GW->>GW: outputHash = keccak256(response)
+    GW->>GW: commitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)
+    GW->>GW: EIP-712 sign WyriweAttestation
+    GW->>DB: INSERT OR IGNORE signed attestation record
+    GW-->>Client: { data: "0x..." }
+
+    Note over DB,Chain: async — admin-triggered batch publish
+    DB->>Chain: record(attestation, sig)
+    Chain-->>DB: signerOf[commitmentHash] anchored
+```
+
+### Attestation stack
+
+```mermaid
+graph TB
+    T["EIP-3668 · Transport\nCCIP-Read client-to-gateway"]
+    S["EIP-191 · Record signing\nkeccak256(inputHash · namespace · valueHash · ts)"]
+    W["WYRIWE · Input provenance\nsentinel path: inputHash = rawInputHash\nnon-sentinel: inputHash = keccak256(abi.encode(raw, pipelineHash))"]
+    I["ERC-8004 · Agent identity\nagentId · registryAddress declared on-chain"]
+    O["OCP / ERC-8263 · Observation commitment\ncommitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)"]
+    A["EIP-712 · WyriweAttestation\nstructured signing · verifiable by any peer · synced by mesh"]
+    V["VNI · Node identity\nEIP-191 signed { nodeId · signerAddress · url · version · ts }"]
+    C["On-chain anchoring · Sepolia\nAttestationIndex — signerOf · commitmentOf\nNodeRegistry — register(url, sig)"]
+
+    T --> S --> W --> I --> O --> A --> V --> C
+```
+
+---
+
+## Contracts
+
+Both contracts are permissionless — no owner, no admin. One deployment per chain serves all nodes.
+
+| Contract | Sepolia address | Purpose |
+|---|---|---|
+| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | Anchors EIP-712 `WyriweAttestation` records on-chain. Stores `signerOf[commitmentHash]` and `commitmentOf[inputHash]`. |
+| `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public directory of nodes. `register(url, sig)` proves key ownership via EIP-191 — the relayer (`msg.sender`) does not need to be the signing key. |
+
+Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.etherscan.io/address/0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14) · Solc 0.8.24 · optimizer 200 runs.
+
+**To use on Sepolia:** open the admin panel → Deploy contracts → select Sepolia → "Use these addresses →". Addresses are saved to config automatically, no deployment needed.
+
+**To deploy to another chain:** open the admin panel → Deploy contracts → select the chain → connect wallet → two transactions (one per contract). No private key is stored — MetaMask signs everything in-browser.
+
+Source: [`contracts/AttestationIndex.sol`](contracts/AttestationIndex.sol) · [`contracts/NodeRegistry.sol`](contracts/NodeRegistry.sol)
+
+---
+
 ## Two tiers
 
 ### Basic — plug in a resolver, get a gateway + mesh
@@ -105,16 +205,6 @@ npm run dev
 | `MODEL_HASH` | No | — | `keccak256` of model weights CID. Required to activate WYRIWE attestation. |
 
 \* Can also come from `config.json` written by the setup wizard.
-
-### Canonical contract deployments
-
-Use these shared addresses — no need to deploy your own:
-
-| Chain | AttestationIndex | NodeRegistry |
-|---|---|---|
-| Sepolia (11155111) | `0x107D706112225aC57eCf6692FBbDC283fb6E3698` | `0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7` |
-
-The admin panel's **Deploy contracts** panel auto-populates these for any chain with a canonical deployment.
 
 ---
 
