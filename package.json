@@ -27,12 +27,19 @@
     "contracts/NodeRegistry.sol"
   ],
   "keywords": [
-    "ccip-read", "eip-3668", "ens", "ethereum", "gateway",
-    "attestation", "wyriwe", "erc-8004", "ocp"
+    "ccip-read",
+    "eip-3668",
+    "ens",
+    "ethereum",
+    "gateway",
+    "attestation",
+    "wyriwe",
+    "erc-8004",
+    "ocp"
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Echo-Merlini/ccip-router.git"
+    "url": "git+https://github.com/Echo-Merlini/ccip-router.git"
   },
   "homepage": "https://github.com/Echo-Merlini/ccip-router#readme",
   "scripts": {
