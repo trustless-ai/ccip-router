@@ -1,0 +1,36 @@
+services:
+  node-a:
+    build: .
+    container_name: ccip-node-a
+    ports:
+      - "3001:3000"
+    volumes:
+      - node-a-data:/data
+    environment:
+      PORT: 3000
+      DB_PATH: /data/data.db
+      SYNC_NAMESPACE: agent-attestations
+      SYNC_INTERVAL: "*/1 * * * *"   # 1-minute ticks for testing
+      # Hardhat/Anvil account #0 — public dev key, safe to commit, never use in production
+      GATEWAY_PRIVATE_KEY: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      PEERS: "http://node-b:3000"
+
+  node-b:
+    build: .
+    container_name: ccip-node-b
+    ports:
+      - "3002:3000"
+    volumes:
+      - node-b-data:/data
+    environment:
+      PORT: 3000
+      DB_PATH: /data/data.db
+      SYNC_NAMESPACE: agent-attestations
+      SYNC_INTERVAL: "*/1 * * * *"
+      # Hardhat/Anvil account #1 — public dev key, safe to commit, never use in production
+      GATEWAY_PRIVATE_KEY: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
+      PEERS: "http://node-a:3000"
+
+volumes:
+  node-a-data:
+  node-b-data:

@@ -33,6 +33,24 @@ npm install
 npm run dev
 ```
 
+## Two-node test (Docker)
+
+Spins up node-a (:3001) and node-b (:3002) pointing at each other as peers.
+Uses Hardhat dev keys — safe for local testing only.
+
+```bash
+docker compose up --build
+
+# node-a health
+curl http://localhost:3001/health
+
+# node-b health
+curl http://localhost:3002/health
+
+# after a sync tick (~1 min), records written on node-a appear on node-b:
+curl http://localhost:3002/verify/<inputHash>
+```
+
 ---
 
 ## Mesh sync interface
