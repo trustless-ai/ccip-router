@@ -23,7 +23,7 @@ recordsRouter.get('/', async (c) => {
 
   return c.json({
     protocol:     1,
-    node_version: '0.1.0',
+    node_version: '0.2.0',
     namespace,
     records,
     cursor:       nextCursor,
@@ -41,7 +41,7 @@ peersRouter.get('/', async (c) => {
   const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
     protocol:       1,
-    node_version:  '0.1.0',
+    node_version:  '0.2.0',
     signerAddress,
     peers: peers.map((p) => ({
       url:           p.url,

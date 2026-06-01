@@ -20,7 +20,7 @@ function vniMessage(doc: VniDocument): string {
 export async function makeVni(
   gatewayKey: `0x${string}`,
   url: string,
-  version = '0.1.0',
+  version = '0.2.0',
 ): Promise<SignedVni> {
   const account   = privateKeyToAccount(gatewayKey)
   const timestamp = Math.floor(Date.now() / 1000)

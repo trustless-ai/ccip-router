@@ -12,7 +12,7 @@ describe('makeVni', () => {
     const vni = await makeVni(KEY, URL)
     assert.equal(vni.signerAddress, ADDR)
     assert.equal(vni.url, URL)
-    assert.equal(vni.version, '0.1.0')
+    assert.equal(vni.version, '0.2.0')
     assert.ok(typeof vni.timestamp === 'number')
     assert.match(vni.nodeId, /^0x[0-9a-f]{64}$/)
     assert.match(vni.signature, /^0x[0-9a-f]+$/)
