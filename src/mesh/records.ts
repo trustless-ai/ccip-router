@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { getDB } from '../db/index.js'
+import { getConfig } from '../config.js'
+import { privateKeyToAccount } from 'viem/accounts'
 
 // Standard mesh sync interface — any CCIP gateway implementing this is mesh-compatible
 // GET /records?since=<unix_timestamp>&namespace=<string>&limit=<n>&cursor=<string>
@@ -25,5 +27,27 @@ recordsRouter.get('/', async (c) => {
     namespace,
     records,
     cursor:       nextCursor,
+  })
+})
+
+// GET /peers — public peer list for gossip / auto-discovery
+// Other nodes call this during sync to find new peers in the mesh.
+export const peersRouter = new Hono()
+
+peersRouter.get('/', async (c) => {
+  const config = getConfig()
+  const db     = getDB()
+  const peers  = await db.getPeers()
+  const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
+  return c.json({
+    protocol:       1,
+    node_version:  '0.1.0',
+    signerAddress,
+    peers: peers.map((p) => ({
+      url:           p.url,
+      signerAddress: p.signerAddress,
+      healthy:       p.healthy,
+      lastSyncAt:    p.lastSyncAt,
+    })),
   })
 })

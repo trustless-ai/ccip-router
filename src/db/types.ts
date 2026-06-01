@@ -20,12 +20,18 @@ export type PeerState = {
   signerAddress: string | null  // recovered from signed records during sync
 }
 
+export type Contribution = {
+  sourcePeer: string | null   // null = produced locally
+  count:      number
+}
+
 export interface DB {
   insertRecord(record: MeshRecord): Promise<void>
   getRecordsSince(namespace: string, since: number, limit: number, cursor?: string): Promise<MeshRecord[]>
   getRecord(inputHash: string, namespace?: string): Promise<MeshRecord | null>
   getRecordsByInputHash(inputHash: string): Promise<MeshRecord[]>
   getRecentRecords(namespace: string, limit: number): Promise<MeshRecord[]>
+  getContributions(namespace: string): Promise<Contribution[]>
   upsertPeer(peer: PeerState): Promise<void>
   removePeer(url: string): Promise<void>
   getPeers(): Promise<PeerState[]>

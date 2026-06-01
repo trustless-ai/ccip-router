@@ -16,6 +16,10 @@ export type Config = {
   // Phase 2 on-chain anchoring — optional
   attestationIndex: `0x${string}` | null  // deployed AttestationIndex contract
   rpcUrl:           string | null          // JSON-RPC endpoint for reads + writes
+  // Phase 3 open network — optional
+  nodeUrl:          string | null          // this node's public URL (for VNI + NodeRegistry)
+  nodeRegistry:     `0x${string}` | null  // deployed NodeRegistry contract
+  autoDiscover:     boolean               // pull peer lists from synced peers (default: true)
 }
 
 export type ConfigFile = {
@@ -33,6 +37,10 @@ export type ConfigFile = {
   // Phase 2
   attestationIndex?: string
   rpcUrl?: string
+  // Phase 3
+  nodeUrl?: string
+  nodeRegistry?: string
+  autoDiscover?: boolean
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -94,6 +102,9 @@ export function loadConfig(): Config {
     CHAIN_ID:            process.env.CHAIN_ID            ?? String(file.chainId ?? ''),
     ATTESTATION_INDEX:   process.env.ATTESTATION_INDEX   ?? file.attestationIndex,
     RPC_URL:             process.env.RPC_URL             ?? file.rpcUrl,
+    NODE_URL:            process.env.NODE_URL             ?? file.nodeUrl,
+    NODE_REGISTRY:       process.env.NODE_REGISTRY        ?? file.nodeRegistry,
+    AUTO_DISCOVER:       process.env.AUTO_DISCOVER        ?? String(file.autoDiscover ?? 'true'),
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -135,6 +146,16 @@ export function loadConfig(): Config {
     console.log(`[config] chain:     attestationIndex=${attestationIndex} rpcUrl=${rpcUrl ?? 'unset'}`)
   }
 
+  const nodeUrl      = raw.NODE_URL?.trim() || null
+  const nodeRegistry = raw.NODE_REGISTRY?.trim()
+    ? requireHex('NODE_REGISTRY', raw.NODE_REGISTRY.trim())
+    : null
+  const autoDiscover = raw.AUTO_DISCOVER?.toLowerCase() !== 'false'
+
+  if (nodeUrl) {
+    console.log(`[config] node url:  ${nodeUrl}${nodeRegistry ? ` registry=${nodeRegistry}` : ''}`)
+  }
+
   return {
     port:             parsePort(raw.PORT),
     dbPath:           raw.DB_PATH ?? './data.db',
@@ -148,6 +169,9 @@ export function loadConfig(): Config {
     chainId,
     attestationIndex,
     rpcUrl,
+    nodeUrl,
+    nodeRegistry,
+    autoDiscover,
   }
 }
 

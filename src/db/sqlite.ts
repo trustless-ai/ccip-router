@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { SCHEMA, MIGRATIONS } from './schema.js'
-import type { DB, MeshRecord, PeerState } from './types.js'
+import type { DB, MeshRecord, PeerState, Contribution } from './types.js'
 
 type RecordRow = {
   input_hash: string
@@ -35,6 +35,7 @@ export class SQLiteDB implements DB {
     count: Database.Statement
     recent: Database.Statement
     removePeer: Database.Statement
+    contributions: Database.Statement
     doubleSigns: Database.Statement
   }
 
@@ -112,6 +113,12 @@ export class SQLiteDB implements DB {
       `),
 
       removePeer: this.db.prepare(`DELETE FROM peers WHERE url = ?`),
+
+      contributions: this.db.prepare(`
+        SELECT source_peer, COUNT(*) as count
+        FROM records WHERE namespace = ?
+        GROUP BY source_peer ORDER BY count DESC
+      `),
 
       // double-sign: same (input_hash, namespace), different signature — slashable
       doubleSigns: this.db.prepare(`
@@ -219,6 +226,11 @@ export class SQLiteDB implements DB {
   async getRecentRecords(namespace: string, limit: number): Promise<MeshRecord[]> {
     const rows = this.stmts.recent.all(namespace, limit) as RecordRow[]
     return rows.map(toMeshRecord)
+  }
+
+  async getContributions(namespace: string): Promise<Contribution[]> {
+    const rows = this.stmts.contributions.all(namespace) as { source_peer: string | null; count: number }[]
+    return rows.map((r) => ({ sourcePeer: r.source_peer, count: r.count }))
   }
 
   async removePeer(url: string): Promise<void> {

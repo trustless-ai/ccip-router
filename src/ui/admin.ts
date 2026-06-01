@@ -6,6 +6,7 @@ import { syncAll } from '../mesh/sync.js'
 import { getLogs } from '../log.js'
 import { requireAdmin, setAdminSession, clearAdminSession } from './auth.js'
 import { publishAttestation, type ChainOpts } from '../chain/publish.js'
+import { registerNode } from '../chain/register.js'
 
 export const adminRouter = new Hono()
 
@@ -85,6 +86,11 @@ adminRouter.get('/api/audit', async (c) => {
   const erc8004On  = !!(config.agentId && config.registryAddress)
   const wyriweOn   = wyriweCount > 0
   const chainOn    = !!(config.attestationIndex && config.rpcUrl)
+  const vniOn      = !!(config.gatewayKey && config.nodeUrl)
+  const registryOn = !!(config.nodeRegistry && config.rpcUrl)
+
+  const contributions = await db.getContributions(config.syncNamespace)
+  const peers         = await db.getPeers()
 
   return c.json({ specs: [
     {
@@ -149,6 +155,42 @@ adminRouter.get('/api/audit', async (c) => {
             { k: 'Enable',     v: 'Enable WYRIWE first via withWyriwe() wrapper' },
           ],
     },
+    {
+      key: 'vni', name: 'VNI', label: 'Node Identity',
+      status: vniOn ? 'pass' : 'inactive',
+      description: 'Verifiable Node Identity — signed document proving this node owns its signing key. Fetched by peers during sync.',
+      action: vniOn && registryOn ? 'register' : null,
+      details: vniOn
+        ? [
+            { k: 'Endpoint',   v: '/vni' },
+            { k: 'Node URL',   v: config.nodeUrl! },
+            { k: 'Signer',     v: signerAddress ?? 'not configured' },
+            { k: 'Registry',   v: registryOn ? config.nodeRegistry! : 'not configured — set NODE_REGISTRY' },
+            { k: 'Gossip',     v: config.autoDiscover ? `active — ${peers.length} known peers` : 'disabled (AUTO_DISCOVER=false)' },
+          ]
+        : [
+            { k: 'Missing',    v: 'NODE_URL not set', warn: true },
+            { k: 'Enable',     v: 'Set NODE_URL to this node\'s public URL in env or config.json' },
+          ],
+    },
+    {
+      key: 'erc8275', name: 'ERC-8275', label: 'Node Economics',
+      status: contributions.length > 0 ? 'pass' : 'inactive',
+      description: 'Contribution attribution — tracks how many records each peer has contributed to this node. Foundation for ERC-8275 node economics.',
+      details: contributions.length > 0
+        ? [
+            { k: 'Total peers',  v: String(contributions.length) },
+            ...contributions.slice(0, 4).map((c) => ({
+              k: c.sourcePeer ? c.sourcePeer.replace(/^https?:\/\//, '').slice(0, 30) : 'local',
+              v: `${c.count} record${c.count !== 1 ? 's' : ''}`,
+            })),
+            { k: 'Endpoint',     v: '/contributions' },
+          ]
+        : [
+            { k: 'Status',       v: 'No synced records yet — contributions tracked once peers sync' },
+            { k: 'Endpoint',     v: '/contributions' },
+          ],
+    },
   ]})
 })
 
@@ -190,6 +232,21 @@ adminRouter.post('/api/publish', async (c) => {
   }
   console.log(`[publish] ${published} anchored, ${skipped} already on-chain, ${errors.length} errors`)
   return c.json({ ok: true, published, skipped, errors })
+})
+
+adminRouter.post('/api/register', async (c) => {
+  const config = getConfig()
+  if (!config.nodeRegistry || !config.rpcUrl || !config.gatewayKey || !config.nodeUrl) {
+    return c.json({ error: 'NODE_REGISTRY, NODE_URL, RPC_URL, and GATEWAY_PRIVATE_KEY required' }, 400)
+  }
+  const txHash = await registerNode(config.nodeUrl, {
+    rpcUrl:          config.rpcUrl,
+    chainId:         config.chainId,
+    gatewayKey:      config.gatewayKey,
+    contractAddress: config.nodeRegistry,
+  })
+  console.log(`[register] node registered on-chain: ${txHash}`)
+  return c.json({ ok: true, txHash })
 })
 
 adminRouter.post('/api/peers', async (c) => {
@@ -944,9 +1001,29 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
           <button class="btn btn-ghost btn-sm" id="btn-publish" style="margin-top:12px;width:100%" onclick="publishToChain()">
             ↑ Publish to chain
           </button>
+        \` : s.action === 'register' ? \`
+          <button class="btn btn-ghost btn-sm" id="btn-register" style="margin-top:12px;width:100%" onclick="registerNode()">
+            ↑ Register on-chain
+          </button>
         \` : ''}
       </div>
     \`).join('')
+  }
+
+  async function registerNode() {
+    const btn = document.getElementById('btn-register')
+    if (!btn) return
+    btn.disabled = true; btn.textContent = '↑ Registering...'
+    try {
+      const res  = await fetch('/admin/api/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const data = await res.json()
+      if (!res.ok) { toast(data.error || 'Register failed'); return }
+      toast('↑ Node registered: ' + data.txHash.slice(0, 10) + '…')
+    } catch (e) {
+      toast('Register error: ' + e.message)
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '↑ Register on-chain' }
+    }
   }
 
   async function publishToChain() {

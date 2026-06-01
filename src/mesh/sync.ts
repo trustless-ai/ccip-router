@@ -1,13 +1,14 @@
 import type { DB, MeshRecord, PeerState } from '../db/types.js'
 import type { Config } from '../config.js'
 import { recoverRecordSigner } from '../crypto/index.js'
+import { fetchPeerVni, verifyVni } from './vni.js'
 
 // Manual sync trigger — used by the admin dashboard "Sync now" button.
 export async function syncAll(config: Config, db: DB): Promise<number> {
   const peers = await db.getPeers()
   const results = await Promise.allSettled(
     peers.map(async (peer) => {
-      const update = await syncPeer(peer, config.syncNamespace, db)
+      const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover)
       await db.upsertPeer({ ...peer, ...update })
     }),
   )
@@ -30,11 +31,12 @@ type HealthResponse = {
 }
 
 // Pull all new records from a single peer, paginating until cursor is null.
-// After records are synced, fetches /health to populate nodeVersion.
+// Optionally runs peer gossip (auto-discovery) after syncing.
 export async function syncPeer(
   peer: PeerState,
   namespace: string,
   db: DB,
+  autoDiscover = true,
 ): Promise<Partial<PeerState>> {
   let cursor: string | undefined = undefined
   let inserted = 0
@@ -68,14 +70,21 @@ export async function syncPeer(
       console.log(`[sync] ${peer.url} — +${inserted} inserted, ${rejected} rejected`)
     }
 
-    // Fetch /health to get the peer's current nodeVersion (non-blocking best-effort)
+    // Fetch /vni — authoritative signed identity (preferred over health signerAddress)
+    const vni    = await fetchPeerVni(peer.url)
+    const vniSigner = vni ? await verifyVni(vni) : null
+
+    // Fetch /health for nodeVersion fallback
     const health = await fetchPeerHealth(peer.url)
+
+    // Auto-discovery: pull peer's known peers and add any new ones
+    if (autoDiscover) await discoverPeers(peer, db)
 
     return {
       healthy:       true,
       lastSyncAt:    Math.floor(Date.now() / 1000),
-      nodeVersion:   health?.version        ?? peer.nodeVersion,
-      signerAddress: discoveredSigner       ?? health?.signerAddress ?? peer.signerAddress,
+      nodeVersion:   vni?.version           ?? health?.version      ?? peer.nodeVersion,
+      signerAddress: vniSigner              ?? discoveredSigner      ?? health?.signerAddress ?? peer.signerAddress,
     }
   } catch (err) {
     console.warn(`[sync] ${peer.url} unreachable — ${String(err)}`)
@@ -147,5 +156,32 @@ async function fetchPeerHealth(baseUrl: string): Promise<HealthResponse | null> 
     return res.json() as Promise<HealthResponse>
   } catch {
     return null
+  }
+}
+
+// Fetch the peer's /peers list and add any newly discovered nodes to our DB.
+// Bounded to 10 new peers per sync cycle — prevents runaway growth.
+async function discoverPeers(peer: PeerState, db: DB): Promise<void> {
+  try {
+    const res = await fetch(new URL('/peers', peer.url).toString(), {
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!res.ok) return
+    const data = await res.json() as { peers?: { url: string; signerAddress: string | null }[] }
+    if (!data.peers?.length) return
+
+    const existing = new Set((await db.getPeers()).map((p) => p.url))
+    let added = 0
+    for (const discovered of data.peers) {
+      if (added >= 10) break
+      if (!discovered.url || existing.has(discovered.url)) continue
+      try { new URL(discovered.url) } catch { continue }
+      const url = discovered.url.replace(/\/$/, '')
+      await db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: discovered.signerAddress })
+      added++
+    }
+    if (added > 0) console.log(`[sync] discovered ${added} new peer(s) from ${peer.url}`)
+  } catch {
+    // non-fatal — gossip is best-effort
   }
 }

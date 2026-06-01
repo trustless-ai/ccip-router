@@ -10,6 +10,8 @@ import { recordsRouter } from './mesh/records.js'
 import { verifyRouter } from './verify/verify.js'
 import { ocpRouter } from './verify/ocp.js'
 import { startSyncCron } from './mesh/cron.js'
+import { peersRouter } from './mesh/records.js'
+import { makeVni } from './mesh/vni.js'
 import { setupRouter } from './ui/setup.js'
 import { adminRouter } from './ui/admin.js'
 import { staticRouter } from './ui/static.js'
@@ -96,8 +98,31 @@ const ccip = new CcipRouter({
 
 // Specific named routes must be registered before the CCIP wildcard /:sender/:data
 app.route('/records', recordsRouter)
+app.route('/peers', peersRouter)
 app.route('/verify', verifyRouter)
 app.route('/ocp', ocpRouter)
+
+// GET /vni — signed node identity document (VNI)
+app.get('/vni', async (c) => {
+  if (!config.gatewayKey || !config.nodeUrl) {
+    return c.json({ declared: false, reason: 'NODE_URL and GATEWAY_PRIVATE_KEY required' }, 404)
+  }
+  const vni = await makeVni(config.gatewayKey, config.nodeUrl)
+  return c.json(vni)
+})
+
+// GET /contributions — record attribution per source peer (ERC-8275 MVP)
+app.get('/contributions', async (c) => {
+  const contributions = await db.getContributions(config.syncNamespace)
+  return c.json({
+    namespace: config.syncNamespace,
+    contributions: contributions.map((c) => ({
+      source:  c.sourcePeer ?? 'local',
+      records: c.count,
+    })),
+  })
+})
+
 app.route('/', ccip.hono())
 
 app.get('/health', async (c) => {
@@ -111,12 +136,15 @@ app.get('/health', async (c) => {
     version:       '0.1.0',
     namespace:     config.syncNamespace,
     signerAddress,
+    nodeUrl:       config.nodeUrl ?? null,
     identity:      identity ?? null,
     tiers: {
-      signed:  !!signerAddress,
-      erc8004: !!identity,
-      wyriwe:  wyriweCount > 0,
-      ocp:     wyriweCount > 0,
+      signed:       !!signerAddress,
+      erc8004:      !!identity,
+      wyriwe:       wyriweCount > 0,
+      ocp:          wyriweCount > 0,
+      vni:          !!(config.gatewayKey && config.nodeUrl),
+      onChain:      !!(config.attestationIndex && config.rpcUrl),
     },
     peers:         peers.map((p) => ({
       url:           p.url,

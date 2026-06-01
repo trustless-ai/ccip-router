@@ -240,6 +240,25 @@ GET /identity
 → { declared: false }   (404 — AGENT_ID not configured)
 ```
 
+### Node identity (VNI)
+```
+GET /vni
+→ { nodeId, signerAddress, url, version, timestamp, signature }
+→ { declared: false }   (404 — NODE_URL not configured)
+```
+
+### Peer gossip
+```
+GET /peers
+→ { protocol: 1, node_version, signerAddress, peers: [{ url, signerAddress, healthy, lastSyncAt }] }
+```
+
+### Contributions (ERC-8275)
+```
+GET /contributions
+→ { namespace, contributions: [{ source, records }] }
+```
+
 ### Health
 ```
 GET /health
@@ -296,6 +315,8 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 | ERC-8004 | L1 Identity | Agent identity `agentId` + `registryAddress` in attestation | ✅ implemented |
 | OCP / ERC-8263 | L3 Observation | Observation commitment hash | ✅ implemented |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
+| VNI | L5 Node Identity | Signed node identity, peer gossip | ✅ implemented |
+| ERC-8275 | L6 Economics | Contribution attribution (MVP) | ✅ implemented |
 
 ---
 
@@ -330,16 +351,14 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] `src/chain/` — viem public + wallet clients, `publishAttestation()`, `checkOnChain()`
 - [x] `/verify` on-chain fallback — if `inputHash` not in local DB and `ATTESTATION_INDEX` + `RPC_URL` configured, queries contract and returns on-chain proof
 - [x] `POST /admin/api/publish` — batch-publish recent WYRIWE records to `AttestationIndex`; skips already-anchored; "Publish to chain" button in spec audit panel
+- [x] Open node network — `GET /peers` gossip endpoint; auto-discovery pulls peer lists during sync (bounded at 10/cycle, disable with `AUTO_DISCOVER=false`)
+- [x] VNI (Verifiable Node Identity) — `GET /vni` returns EIP-191 signed `{ nodeId, signerAddress, url, version, timestamp }`; peers verify during sync for authoritative signer resolution
+- [x] `contracts/NodeRegistry.sol` — on-chain node directory; `register(url, sig)` proves key ownership; `POST /admin/api/register` + "Register on-chain" button in VNI spec card
+- [x] ERC-8275 economics (MVP) — contribution attribution via `getContributions(namespace)`; `GET /contributions`; per-peer record counts surfaced in spec audit panel
+- [x] Config: `NODE_URL`, `NODE_REGISTRY`, `AUTO_DISCOVER`; `/health` exposes `tiers.vni` + `tiers.onChain`
 
-### Phase 3
-- [ ] Open node network, VNI integration, ERC-8275 economics
-
-### Phase 2
-- [ ] `AttestationIndex.sol` — chain as source of truth, no shared DB
-- [ ] `/verify` on-chain fallback
-
-### Phase 3
-- [ ] Open node network, VNI integration, ERC-8275 economics
+### Next
+- [ ] UI & accessibility polish
 
 ---
 
