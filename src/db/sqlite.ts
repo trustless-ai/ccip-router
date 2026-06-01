@@ -1,6 +1,15 @@
 import Database from 'better-sqlite3'
 import { SCHEMA, MIGRATIONS } from './schema.js'
-import type { DB, MeshRecord, PeerState, Contribution } from './types.js'
+import type { DB, MeshRecord, PeerState, Contribution, NameRecord } from './types.js'
+
+type EnsRow = {
+  name:        string
+  type:        string
+  coin_type:   number
+  text_key:    string
+  value:       string
+  modified_at: number
+}
 
 type RecordRow = {
   input_hash: string
@@ -37,6 +46,11 @@ export class SQLiteDB implements DB {
     removePeer: Database.Statement
     contributions: Database.Statement
     doubleSigns: Database.Statement
+    ensUpsert: Database.Statement
+    ensDelete: Database.Statement
+    ensGet: Database.Statement
+    ensList: Database.Statement
+    ensListAll: Database.Statement
   }
 
   constructor(path: string) {
@@ -126,6 +140,32 @@ export class SQLiteDB implements DB {
         WHERE input_hash = @inputHash
           AND namespace  = @namespace
           AND signature != @signature
+      `),
+
+      ensUpsert: this.db.prepare(`
+        INSERT INTO ens_records (name, type, coin_type, text_key, value, modified_at)
+        VALUES (@name, @type, @coinType, @textKey, @value, @modifiedAt)
+        ON CONFLICT (name, type, coin_type, text_key) DO UPDATE SET
+          value       = excluded.value,
+          modified_at = excluded.modified_at
+      `),
+
+      ensDelete: this.db.prepare(`
+        DELETE FROM ens_records
+        WHERE name = @name AND type = @type AND coin_type = @coinType AND text_key = @textKey
+      `),
+
+      ensGet: this.db.prepare(`
+        SELECT value FROM ens_records
+        WHERE name = @name AND type = @type AND coin_type = @coinType AND text_key = @textKey
+      `),
+
+      ensList: this.db.prepare(`
+        SELECT * FROM ens_records WHERE name = ? ORDER BY type ASC, coin_type ASC, text_key ASC
+      `),
+
+      ensListAll: this.db.prepare(`
+        SELECT * FROM ens_records ORDER BY name ASC, type ASC, coin_type ASC, text_key ASC
       `),
     }
   }
@@ -237,6 +277,38 @@ export class SQLiteDB implements DB {
     this.stmts.removePeer.run(url)
   }
 
+  async upsertNameRecord(r: Omit<NameRecord, 'modifiedAt'>): Promise<void> {
+    this.stmts.ensUpsert.run({
+      name:       r.name,
+      type:       r.type,
+      coinType:   r.coinType,
+      textKey:    r.textKey,
+      value:      r.value,
+      modifiedAt: Math.floor(Date.now() / 1000),
+    })
+  }
+
+  async deleteNameRecord(name: string, type: string, coinType: number, textKey: string): Promise<void> {
+    this.stmts.ensDelete.run({ name, type, coinType, textKey })
+  }
+
+  async getNameRecordValue(
+    name:     string,
+    type:     string,
+    coinType: number  = -1,
+    textKey:  string  = '',
+  ): Promise<string | null> {
+    const row = this.stmts.ensGet.get({ name, type, coinType, textKey }) as { value: string } | undefined
+    return row?.value ?? null
+  }
+
+  async listNameRecords(name?: string): Promise<NameRecord[]> {
+    const rows = (name
+      ? this.stmts.ensList.all(name)
+      : this.stmts.ensListAll.all()) as EnsRow[]
+    return rows.map(toNameRecord)
+  }
+
   close(): void {
     this.db.close()
   }
@@ -261,5 +333,16 @@ function toPeerState(row: PeerRow): PeerState {
     healthy:       row.healthy === 1,
     nodeVersion:   row.node_version,
     signerAddress: row.signer_address,
+  }
+}
+
+function toNameRecord(row: EnsRow): NameRecord {
+  return {
+    name:       row.name,
+    type:       row.type as NameRecord['type'],
+    coinType:   row.coin_type,
+    textKey:    row.text_key,
+    value:      row.value,
+    modifiedAt: row.modified_at,
   }
 }

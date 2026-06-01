@@ -20,7 +20,13 @@ export type EnsResolverFn = (
   record: EnsRecord,
 ) => Promise<string | null>
 
-const RESOLVE_SELECTOR = '0x9061b923' // resolve(bytes,bytes)
+export const RESOLVE_SELECTOR = '0x9061b923' // resolve(bytes,bytes)
+
+// Returns true if the calldata looks like an ENS resolve(bytes,bytes) call.
+// Use to guard withEns() in multi-purpose resolvers before dispatching.
+export function isEnsCalldata(calldata: string): boolean {
+  return calldata.toLowerCase().startsWith(RESOLVE_SELECTOR)
+}
 const ADDR_SELECTOR    = '0x3b3b57de' // addr(bytes32)
 const ADDR_CT_SELECTOR = '0xf1cb7e06' // addr(bytes32,uint256)
 const TEXT_SELECTOR    = '0x59d1d43c' // text(bytes32,string)

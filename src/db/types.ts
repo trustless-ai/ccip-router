@@ -25,6 +25,15 @@ export type Contribution = {
   count:      number
 }
 
+export type NameRecord = {
+  name:       string
+  type:       'addr' | 'addr_coin' | 'text' | 'contenthash'
+  coinType:   number    // -1 when not applicable
+  textKey:    string    // '' when not applicable
+  value:      string
+  modifiedAt: number
+}
+
 export interface DB {
   insertRecord(record: MeshRecord): Promise<void>
   getRecordsSince(namespace: string, since: number, limit: number, cursor?: string): Promise<MeshRecord[]>
@@ -36,5 +45,10 @@ export interface DB {
   removePeer(url: string): Promise<void>
   getPeers(): Promise<PeerState[]>
   recordCount(namespace: string): Promise<number>
+  // ENS name records — admin-managed, served via withEns()
+  upsertNameRecord(r: Omit<NameRecord, 'modifiedAt'>): Promise<void>
+  deleteNameRecord(name: string, type: string, coinType: number, textKey: string): Promise<void>
+  getNameRecordValue(name: string, type: string, coinType?: number, textKey?: string): Promise<string | null>
+  listNameRecords(name?: string): Promise<NameRecord[]>
   close(): void
 }

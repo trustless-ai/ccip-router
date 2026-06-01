@@ -6,6 +6,8 @@ import { getConfig, isConfigured } from './config.js'
 import { getDB } from './db/index.js'
 import { CcipRouter } from './router/index.js'
 import { withWyriwe } from './attestation/withWyriwe.js'
+import { withEns, isEnsCalldata } from './ens/withEns.js'
+import type { EnsResolverFn } from './ens/withEns.js'
 import { recordsRouter } from './mesh/records.js'
 import { verifyRouter } from './verify/verify.js'
 import { ocpRouter } from './verify/ocp.js'
@@ -58,8 +60,23 @@ const identity = config.agentId && config.registryAddress
   ? { agentId: config.agentId, registryAddress: config.registryAddress, chainId: config.chainId }
   : undefined
 
-// Base resolver — returns empty bytes (override for custom logic)
-const baseResolver = async (_sender: string, _calldata: `0x${string}`, _namespace: string): Promise<`0x${string}`> => '0x'
+// DB-backed ENS resolver — reads from the ens_records table managed via admin panel
+const ensResolverFn: EnsResolverFn = async (name, record) => {
+  if (record.type === 'addr' && 'coinType' in record) {
+    return db.getNameRecordValue(name, 'addr_coin', Number(record.coinType))
+  }
+  if (record.type === 'addr')        return db.getNameRecordValue(name, 'addr')
+  if (record.type === 'text')        return db.getNameRecordValue(name, 'text', -1, record.key)
+  if (record.type === 'contenthash') return db.getNameRecordValue(name, 'contenthash')
+  return null
+}
+const ensResolver = withEns(ensResolverFn)
+
+// Base resolver — ENS calldata goes to the DB-backed ENS resolver; everything else returns 0x.
+const baseResolver = async (sender: string, calldata: `0x${string}`, namespace: string): Promise<`0x${string}`> => {
+  if (isEnsCalldata(calldata)) return ensResolver(sender as `0x${string}`, calldata, namespace)
+  return '0x'
+}
 
 // Activate full attestation pipeline when all required fields are present:
 //   GATEWAY_PRIVATE_KEY + AGENT_ID + REGISTRY_ADDRESS + MODEL_HASH
@@ -127,7 +144,7 @@ app.get('/health', async (c) => {
   ])
   return c.json({
     ok:            true,
-    version:       '0.1.0',
+    version:       '0.2.0',
     namespace:     config.syncNamespace,
     signerAddress,
     nodeUrl:       config.nodeUrl ?? null,

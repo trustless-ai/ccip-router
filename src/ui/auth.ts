@@ -1,52 +1,63 @@
-import { createHash } from 'node:crypto'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import type { MiddlewareHandler } from 'hono'
+import { createSession, getSession, deleteSession } from './siwe.js'
 
-// Derive a fixed session token from the secret — rotating the secret invalidates all sessions
-export function makeSessionToken(secret: string): string {
-  return createHash('sha256').update('ccip-router:' + secret).digest('hex')
+// Return the wallet address associated with the current session cookie, or null.
+export function getSessionAddress(c: Parameters<MiddlewareHandler>[0]): `0x${string}` | null {
+  const token = getCookie(c, 'admin_session')
+  if (!token) return null
+  return getSession(token)
 }
 
 // Applies to all /admin/* routes.
-// If adminSecret is null → open access (dev mode, warning shown in UI).
-// Otherwise: check cookie (browser) or Authorization: Bearer <secret> (API).
-export function requireAdmin(adminSecret: string | null): MiddlewareHandler {
+// authorizedAddress: the gateway signer address — only this wallet can log in via SIWE
+// adminSecret:       optional Bearer-token fallback for CLI / scripts
+// If both are null → open access (dev mode, warning shown in UI)
+export function requireAdmin(
+  authorizedAddress: string | null,
+  adminSecret:       string | null,
+): MiddlewareHandler {
   return async (c, next) => {
-    if (!adminSecret) return next()
+    if (!authorizedAddress && !adminSecret) return next()
 
-    // Login/logout are always public — they ARE the auth mechanism
     const path = c.req.path
-    if (path.endsWith('/login') || path.endsWith('/logout')) return next()
+    // Auth endpoints are always public — they ARE the auth mechanism
+    if (
+      path.endsWith('/login')       ||
+      path.endsWith('/logout')      ||
+      path.endsWith('/siwe/nonce')  ||
+      path.endsWith('/siwe/verify')
+    ) return next()
 
-    const token = makeSessionToken(adminSecret)
+    // SIWE session check
+    if (authorizedAddress) {
+      const sessionAddr = getSessionAddress(c)
+      if (sessionAddr?.toLowerCase() === authorizedAddress.toLowerCase()) return next()
+    }
 
-    // Cookie path — browser sessions
-    const cookie = getCookie(c, 'admin_session')
-    if (cookie === token) return next()
-
-    // Bearer token — programmatic API access
+    // Bearer token fallback (for CLI / scripts)
     const auth = c.req.header('Authorization')
-    if (auth === `Bearer ${adminSecret}`) return next()
+    if (adminSecret && auth === `Bearer ${adminSecret}`) return next()
 
-    // API routes → 401 JSON
     if (c.req.path.startsWith('/admin/api')) {
       return c.json({ error: 'unauthorized' }, 401)
     }
-
-    // Dashboard routes → login page
     return c.redirect('/admin/login')
   }
 }
 
-export function setAdminSession(c: Parameters<MiddlewareHandler>[0], secret: string) {
-  setCookie(c, 'admin_session', makeSessionToken(secret), {
+export function setAdminSession(c: Parameters<MiddlewareHandler>[0], address: `0x${string}`) {
+  const token = createSession(address)
+  setCookie(c, 'admin_session', token, {
     httpOnly: true,
     sameSite: 'Strict',
     path:     '/admin',
-    maxAge:   60 * 60 * 24 * 7, // 7 days
+    maxAge:   60 * 60 * 24 * 7,  // 7 days
   })
 }
 
 export function clearAdminSession(c: Parameters<MiddlewareHandler>[0]) {
+  const token = getCookie(c, 'admin_session')
+  if (token) deleteSession(token)
   deleteCookie(c, 'admin_session', { path: '/admin' })
 }

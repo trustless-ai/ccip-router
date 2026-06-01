@@ -6,34 +6,54 @@ import { getDB } from '../db/index.js'
 import { syncAll } from '../mesh/sync.js'
 import { getLogs } from '../log.js'
 import { requireAdmin, setAdminSession, clearAdminSession } from './auth.js'
+import { generateNonce, verifySiwe } from './siwe.js'
 import { publishAttestation, type ChainOpts } from '../chain/publish.js'
 import { registerNode } from '../chain/register.js'
 
 export const adminRouter = new Hono()
 
-// Auth middleware — applies to every /admin/* route
+// Auth middleware — applies to every /admin/* route.
+// Authorized signer = the node's gateway key holder (SIWE).
+// Bearer ADMIN_SECRET is a fallback for CLI / scripts.
 adminRouter.use('*', async (c, next) => {
-  const { adminSecret } = getConfig()
-  return requireAdmin(adminSecret)(c, next)
+  const config = getConfig()
+  const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
+  return requireAdmin(signerAddress, config.adminSecret)(c, next)
 })
 
 // ── Auth routes ───────────────────────────────────────────────────────────────
 
 adminRouter.get('/login', (c) => {
-  const { adminSecret } = getConfig()
-  if (!adminSecret) return c.redirect('/admin')
+  const config = getConfig()
+  // If no gateway key, admin is open (dev mode)
+  if (!config.gatewayKey && !config.adminSecret) return c.redirect('/admin')
   return c.html(LOGIN_HTML)
 })
 
-adminRouter.post('/login', async (c) => {
-  const { adminSecret } = getConfig()
-  if (!adminSecret) return c.redirect('/admin')
-  const { secret } = await c.req.json<{ secret: string }>()
-  if (!secret || secret !== adminSecret) {
-    return c.json({ error: 'invalid secret' }, 401)
-  }
-  setAdminSession(c, adminSecret)
-  return c.json({ ok: true })
+// SIWE: GET /admin/siwe/nonce — return a fresh nonce + the authorized signer address
+adminRouter.get('/siwe/nonce', (c) => {
+  const config = getConfig()
+  if (!config.gatewayKey) return c.json({ error: 'no gateway key — SIWE unavailable' }, 400)
+  const signerAddress = privateKeyToAccount(config.gatewayKey).address
+  const nonce = generateNonce()
+  const domain = c.req.header('host') || 'localhost'
+  return c.json({ nonce, domain, chainId: config.chainId, authorizedAddress: signerAddress })
+})
+
+// SIWE: POST /admin/siwe/verify — verify signature, issue session cookie
+adminRouter.post('/siwe/verify', async (c) => {
+  const config = getConfig()
+  if (!config.gatewayKey) return c.json({ error: 'no gateway key' }, 400)
+  const signerAddress = privateKeyToAccount(config.gatewayKey).address
+
+  const { message, signature } = await c.req.json<{ message: string; signature: string }>()
+  if (!message || !signature) return c.json({ error: 'message and signature required' }, 400)
+
+  const valid = await verifySiwe(message, signature as `0x${string}`, signerAddress)
+  if (!valid) return c.json({ error: 'invalid signature or expired nonce' }, 401)
+
+  setAdminSession(c, signerAddress)
+  return c.json({ ok: true, address: signerAddress })
 })
 
 adminRouter.post('/logout', (c) => {
@@ -54,7 +74,7 @@ adminRouter.get('/api/status', async (c) => {
   ])
   const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
-    version: '0.1.0', signerAddress,
+    version: '0.2.0', signerAddress,
     namespace: config.syncNamespace, syncInterval: config.syncInterval,
     protected: !!config.adminSecret,
     records: count,
@@ -368,6 +388,45 @@ adminRouter.post('/api/key', async (c) => {
   return c.json({ ok: true })
 })
 
+// ── ENS records API ───────────────────────────────────────────────────────────
+
+adminRouter.get('/api/ens-records', async (c) => {
+  const name = c.req.query('name') || undefined
+  const records = await getDB().listNameRecords(name)
+  return c.json({ records })
+})
+
+adminRouter.post('/api/ens-records', async (c) => {
+  const body = await c.req.json<{
+    name:     string
+    type:     string
+    coinType?: number
+    textKey?:  string
+    value:    string
+  }>()
+  const { name, type, value } = body
+  if (!name || !type || !value) return c.json({ error: 'name, type, value required' }, 400)
+  const allowed = ['addr', 'addr_coin', 'text', 'contenthash']
+  if (!allowed.includes(type)) return c.json({ error: `type must be one of: ${allowed.join(', ')}` }, 400)
+
+  await getDB().upsertNameRecord({
+    name,
+    type:     type as 'addr' | 'addr_coin' | 'text' | 'contenthash',
+    coinType: body.coinType ?? -1,
+    textKey:  body.textKey  ?? '',
+    value,
+  })
+  return c.json({ ok: true })
+})
+
+adminRouter.delete('/api/ens-records', async (c) => {
+  const body = await c.req.json<{ name: string; type: string; coinType?: number; textKey?: string }>()
+  const { name, type } = body
+  if (!name || !type) return c.json({ error: 'name and type required' }, 400)
+  await getDB().deleteNameRecord(name, type, body.coinType ?? -1, body.textKey ?? '')
+  return c.json({ ok: true })
+})
+
 // ── Dashboard HTML ────────────────────────────────────────────────────────────
 
 adminRouter.get('/', (c) => c.html(ADMIN_HTML))
@@ -416,7 +475,7 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>ccip-router — login</title>
+  <title>ccip-router — sign in</title>
   <link rel="icon" href="/favicon.svg"/>
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
@@ -443,44 +502,48 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
     .logo-text { font-size: 15px; font-weight: 600; }
     .logo-sub  { font-size: 11px; color: var(--subtle); font-weight: 300; }
 
-    label { display: block; font-size: 11px; color: var(--subtle); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 8px; }
-
-    .input-wrap { position: relative; }
-    input[type=password], input[type=text] {
-      width: 100%;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--border); border-radius: 11px;
-      color: var(--text); font-size: 14px; font-family: var(--mono);
-      padding: 11px 40px 11px 14px; outline: none;
-      transition: border-color 0.15s;
+    .authorized-addr {
+      font-family: var(--mono); font-size: 11px; color: var(--subtle);
+      background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 12px; margin-bottom: 20px;
+      display: flex; align-items: center; gap: 8px;
     }
-    input:focus { border-color: rgba(99,102,241,0.5); }
+    .authorized-addr .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
 
-    .eye-btn {
-      position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
-      background: none; border: none; color: var(--muted); cursor: pointer;
-      font-size: 15px; padding: 4px;
-    }
-    .eye-btn:hover { color: var(--subtle); }
-
-    .btn-submit {
-      width: 100%; margin-top: 18px;
+    .btn-siwe {
+      width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
       background: var(--accent); color: #fff;
       border: none; border-radius: 11px;
       font-size: 14px; font-weight: 500; font-family: inherit;
-      padding: 12px; cursor: pointer;
+      padding: 13px; cursor: pointer;
       box-shadow: 0 0 20px rgba(99,102,241,0.25);
       transition: all 0.15s;
     }
-    .btn-submit:hover { background: var(--accent-v); box-shadow: 0 0 28px rgba(139,92,246,0.35); }
-    .btn-submit:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+    .btn-siwe:hover { background: var(--accent-v); box-shadow: 0 0 28px rgba(139,92,246,0.35); }
+    .btn-siwe:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
 
-    .error {
-      margin-top: 14px; padding: 10px 14px;
-      background: var(--red-l); border: 1px solid rgba(239,68,68,0.2);
-      border-radius: 9px; font-size: 12px; color: var(--red);
-      display: none;
+    .divider {
+      display: flex; align-items: center; gap: 12px;
+      margin: 20px 0 16px; color: var(--muted); font-size: 11px;
     }
+    .divider::before, .divider::after {
+      content: ''; flex: 1; height: 1px; background: var(--border);
+    }
+
+    .cli-note {
+      font-size: 11px; color: var(--muted); text-align: center; line-height: 1.6;
+    }
+    .cli-note code {
+      font-family: var(--mono); background: var(--s2);
+      padding: 2px 5px; border-radius: 4px; font-size: 10px;
+    }
+
+    .msg {
+      margin-top: 16px; padding: 10px 14px;
+      border-radius: 9px; font-size: 12px; display: none;
+    }
+    .msg.error { background: var(--red-l); border: 1px solid rgba(239,68,68,0.2); color: var(--red); }
+    .msg.info  { background: var(--accent-l); border: 1px solid var(--accent-b); color: var(--indigo); }
   </style>
 </head>
 <body>
@@ -489,47 +552,141 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
     <div class="logo-icon"><img src="/favicon.svg" alt=""/></div>
     <div>
       <div class="logo-text">ccip-router</div>
-      <div class="logo-sub">admin access</div>
+      <div class="logo-sub">sign in with ethereum</div>
     </div>
   </div>
 
-  <label for="secret">Admin secret</label>
-  <div class="input-wrap">
-    <input type="password" id="secret" placeholder="Enter your admin secret" autofocus/>
-    <button class="eye-btn" type="button" onclick="toggleEye()" id="eye-btn">👁</button>
+  <div class="authorized-addr" id="auth-addr" style="display:none">
+    <span class="dot"></span>
+    <span id="auth-addr-text">loading...</span>
   </div>
 
-  <button class="btn-submit" id="btn" onclick="login()">Unlock dashboard</button>
-  <div class="error" id="err">Invalid secret — check ADMIN_SECRET in your config.</div>
+  <button class="btn-siwe" id="btn" onclick="siweLogin()">
+    <svg width="18" height="18" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="16" fill="#627EEA"/><path d="M16.498 4v8.87l7.497 3.35L16.498 4z" fill="#fff" fill-opacity=".6"/><path d="M16.498 4L9 16.22l7.498-3.35V4z" fill="#fff"/><path d="M16.498 21.968v6.027L24 17.616l-7.502 4.352z" fill="#fff" fill-opacity=".6"/><path d="M16.498 27.995v-6.028L9 17.616l7.498 10.379z" fill="#fff"/><path d="M16.498 20.573l7.497-4.352-7.497-3.348v7.7z" fill="#fff" fill-opacity=".2"/><path d="M9 16.22l7.498 4.353v-7.7L9 16.22z" fill="#fff" fill-opacity=".6"/></svg>
+    Connect wallet
+  </button>
+
+  <div class="divider">or</div>
+  <p class="cli-note">For CLI / scripts, use<br><code>Authorization: Bearer &lt;ADMIN_SECRET&gt;</code></p>
+
+  <div class="msg error" id="err"></div>
+  <div class="msg info"  id="info"></div>
 </div>
 
 <script>
-  function toggleEye() {
-    const input = document.getElementById('secret')
-    input.type = input.type === 'password' ? 'text' : 'password'
+  let authorizedAddress = null
+
+  async function init() {
+    try {
+      const res = await fetch('/admin/siwe/nonce')
+      if (!res.ok) return
+      const data = await res.json()
+      authorizedAddress = data.authorizedAddress
+      const el = document.getElementById('auth-addr')
+      const txt = document.getElementById('auth-addr-text')
+      el.style.display = 'flex'
+      txt.textContent = 'Authorized: ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4)
+      // Store nonce for use in login — pre-fetched
+      window._nonce = data.nonce
+      window._domain = data.domain
+      window._chainId = data.chainId
+    } catch {}
   }
 
-  async function login() {
-    const secret = document.getElementById('secret').value.trim()
-    if (!secret) return
+  async function siweLogin() {
     const btn = document.getElementById('btn')
-    btn.disabled = true; btn.textContent = 'Unlocking...'
-    const res = await fetch('/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secret }),
-    })
-    if (res.ok) {
-      window.location.href = '/admin'
-    } else {
-      btn.disabled = false; btn.textContent = 'Unlock dashboard'
-      document.getElementById('err').style.display = 'block'
+    const errEl = document.getElementById('err')
+    const infoEl = document.getElementById('info')
+    errEl.style.display = 'none'
+    infoEl.style.display = 'none'
+
+    if (!window.ethereum) {
+      showError('No Ethereum wallet detected. Install MetaMask or use a Bearer token via CLI.')
+      return
+    }
+
+    try {
+      btn.disabled = true
+      btn.textContent = 'Connecting...'
+
+      // 1. Request accounts
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      const address = accounts[0]
+
+      if (authorizedAddress && address.toLowerCase() !== authorizedAddress.toLowerCase()) {
+        showError('Wrong wallet. Expected ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4) + ' (your gateway signing key).')
+        btn.disabled = false; btn.innerHTML = connectBtnHTML()
+        return
+      }
+
+      btn.textContent = 'Fetching nonce...'
+
+      // 2. Get fresh nonce
+      const nonceRes = await fetch('/admin/siwe/nonce')
+      const { nonce, domain, chainId } = await nonceRes.json()
+
+      btn.textContent = 'Sign in wallet...'
+
+      // 3. Build SIWE message
+      const now = new Date()
+      const exp = new Date(now.getTime() + 10 * 60 * 1000)
+      const message = [
+        domain + ' wants you to sign in with your Ethereum account:',
+        address,
+        '',
+        'Sign in to ccip-router admin dashboard',
+        '',
+        'URI: ' + window.location.origin,
+        'Version: 1',
+        'Chain ID: ' + chainId,
+        'Nonce: ' + nonce,
+        'Issued At: ' + now.toISOString(),
+        'Expiration Time: ' + exp.toISOString(),
+      ].join('\\n')
+
+      // 4. Sign with personal_sign
+      const signature = await window.ethereum.request({
+        method: 'personal_sign',
+        params: [message, address],
+      })
+
+      btn.textContent = 'Verifying...'
+
+      // 5. Verify on server
+      const verifyRes = await fetch('/admin/siwe/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, signature }),
+      })
+
+      if (verifyRes.ok) {
+        window.location.href = '/admin'
+      } else {
+        const { error } = await verifyRes.json()
+        showError(error || 'Signature verification failed')
+        btn.disabled = false; btn.innerHTML = connectBtnHTML()
+      }
+    } catch (err) {
+      if (err.code === 4001) {
+        showError('Signature rejected.')
+      } else {
+        showError(String(err.message || err))
+      }
+      btn.disabled = false; btn.innerHTML = connectBtnHTML()
     }
   }
 
-  document.getElementById('secret').addEventListener('keydown', e => {
-    if (e.key === 'Enter') login()
-  })
+  function showError(msg) {
+    const el = document.getElementById('err')
+    el.textContent = msg
+    el.style.display = 'block'
+  }
+
+  function connectBtnHTML() {
+    return '<svg width="18" height="18" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="16" fill="#627EEA"/><path d="M16.498 4v8.87l7.497 3.35L16.498 4z" fill="#fff" fill-opacity=".6"/><path d="M16.498 4L9 16.22l7.498-3.35V4z" fill="#fff"/><path d="M16.498 21.968v6.027L24 17.616l-7.502 4.352z" fill="#fff" fill-opacity=".6"/><path d="M16.498 27.995v-6.028L9 17.616l7.498 10.379z" fill="#fff"/><path d="M16.498 20.573l7.497-4.352-7.497-3.348v7.7z" fill="#fff" fill-opacity=".2"/><path d="M9 16.22l7.498 4.353v-7.7L9 16.22z" fill="#fff" fill-opacity=".6"/></svg> Connect wallet'
+  }
+
+  init()
 </script>
 </body>
 </html>`
@@ -1200,6 +1357,74 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="audit-panel" id="ens-panel" style="margin-top:16px">
+    <div class="audit-header" id="ens-header" onclick="toggleEnsPanel()">
+      <div class="panel-title">ENS records</div>
+      <span class="audit-chevron" id="ens-chevron">▼</span>
+    </div>
+    <div id="ens-body" style="display:none">
+      <div class="config-form">
+
+        <div class="config-section">
+          <div class="config-section-title">Managed records</div>
+          <p style="font-size:13px;color:var(--subtle);margin:0 0 14px">
+            Records stored here are served automatically when your resolver receives ENS
+            <code style="font-family:var(--mono);font-size:11px;background:var(--s2);padding:2px 5px;border-radius:4px">resolve(bytes,bytes)</code>
+            calldata. Requires <code style="font-family:var(--mono);font-size:11px;background:var(--s2);padding:2px 5px;border-radius:4px">withEns()</code> in your resolver (default in standalone mode).
+          </p>
+          <div id="ens-table-wrap" style="overflow-x:auto;margin-bottom:16px">
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead>
+                <tr style="color:var(--subtle);text-align:left">
+                  <th style="padding:6px 10px;border-bottom:1px solid var(--border)">Name</th>
+                  <th style="padding:6px 10px;border-bottom:1px solid var(--border)">Type</th>
+                  <th style="padding:6px 10px;border-bottom:1px solid var(--border)">Key / CoinType</th>
+                  <th style="padding:6px 10px;border-bottom:1px solid var(--border)">Value</th>
+                  <th style="padding:6px 10px;border-bottom:1px solid var(--border)"></th>
+                </tr>
+              </thead>
+              <tbody id="ens-records-body">
+                <tr><td colspan="5" style="padding:12px 10px;color:var(--muted);font-size:12px">No records yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Add / update record</div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">Name (e.g. vitalik.eth)</label>
+              <input class="cfg-input" type="text" id="ens-name" placeholder="name.eth"/>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">Type</label>
+              <select class="cfg-input" id="ens-type" onchange="onEnsTypeChange()" style="width:100%">
+                <option value="addr">addr — ETH address</option>
+                <option value="addr_coin">addr_coin — multi-coin</option>
+                <option value="text">text — text record</option>
+                <option value="contenthash">contenthash — bytes</option>
+              </select>
+            </div>
+          </div>
+          <div class="cfg-row-2">
+            <div class="cfg-field" id="ens-extra-wrap" style="display:none">
+              <label class="cfg-label" id="ens-extra-label">Key</label>
+              <input class="cfg-input" type="text" id="ens-extra" placeholder="avatar"/>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">Value</label>
+              <input class="cfg-input" type="text" id="ens-value" placeholder="0x... or https://..."/>
+            </div>
+          </div>
+          <button class="cfg-save-btn" onclick="addEnsRecord()" style="margin-top:4px">Add record</button>
+          <div class="cfg-hint">Changes take effect immediately — no restart needed.</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <div class="audit-panel" id="deploy-panel" style="margin-top:16px">
     <div class="audit-header" id="deploy-header" onclick="toggleDeployPanel()">
       <div class="panel-title">Deploy contracts</div>
@@ -1722,6 +1947,95 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     btn.textContent = 'Restarting...'
     toast('Config saved — restarting node')
     setTimeout(() => { window.location.href = '/admin' }, 4500)
+  }
+
+  // ── ENS records panel ─────────────────────────────────────────────────────
+
+  let ensOpen = false
+  function toggleEnsPanel() {
+    ensOpen = !ensOpen
+    document.getElementById('ens-body').style.display    = ensOpen ? 'block' : 'none'
+    document.getElementById('ens-chevron').textContent   = ensOpen ? '▲' : '▼'
+    if (ensOpen) loadEnsRecords()
+  }
+
+  function onEnsTypeChange() {
+    const type    = document.getElementById('ens-type').value
+    const wrap    = document.getElementById('ens-extra-wrap')
+    const label   = document.getElementById('ens-extra-label')
+    const input   = document.getElementById('ens-extra')
+    if (type === 'text') {
+      wrap.style.display = 'block'; label.textContent = 'Key'; input.placeholder = 'avatar'
+    } else if (type === 'addr_coin') {
+      wrap.style.display = 'block'; label.textContent = 'Coin type (int)'; input.placeholder = '60'
+    } else {
+      wrap.style.display = 'none'
+    }
+  }
+
+  async function loadEnsRecords() {
+    try {
+      const res  = await fetch('/admin/api/ens-records')
+      const data = await res.json()
+      const tbody = document.getElementById('ens-records-body')
+      if (!data.records || data.records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:12px 10px;color:var(--muted);font-size:12px">No records yet.</td></tr>'
+        return
+      }
+      tbody.innerHTML = data.records.map(r => {
+        const extra = r.type === 'text' ? r.textKey : r.type === 'addr_coin' ? r.coinType : '—'
+        const val   = r.value.length > 42 ? r.value.slice(0, 20) + '…' + r.value.slice(-8) : r.value
+        return \`<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:8px 10px;font-family:var(--mono);font-size:11px">\${r.name}</td>
+          <td style="padding:8px 10px;color:var(--subtle)">\${r.type}</td>
+          <td style="padding:8px 10px;color:var(--subtle)">\${extra}</td>
+          <td style="padding:8px 10px;font-family:var(--mono);font-size:11px" title="\${r.value}">\${val}</td>
+          <td style="padding:8px 10px;text-align:right">
+            <button onclick="deleteEnsRecord('\${r.name}','\${r.type}',\${r.coinType},'\${r.textKey}')"
+              style="background:none;border:1px solid rgba(239,68,68,0.3);color:var(--red);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">
+              delete
+            </button>
+          </td>
+        </tr>\`
+      }).join('')
+    } catch (err) {
+      console.error('loadEnsRecords', err)
+    }
+  }
+
+  async function addEnsRecord() {
+    const name  = document.getElementById('ens-name').value.trim()
+    const type  = document.getElementById('ens-type').value
+    const value = document.getElementById('ens-value').value.trim()
+    const extra = document.getElementById('ens-extra').value.trim()
+    if (!name || !value) { toast('Name and value are required'); return }
+    const body = { name, type, value }
+    if (type === 'text')     body.textKey  = extra || ''
+    if (type === 'addr_coin') body.coinType = parseInt(extra) || 60
+    const res = await fetch('/admin/api/ens-records', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (res.ok) {
+      toast('Record saved')
+      document.getElementById('ens-name').value  = ''
+      document.getElementById('ens-value').value = ''
+      document.getElementById('ens-extra').value = ''
+      loadEnsRecords()
+    } else {
+      const { error } = await res.json()
+      toast('Error: ' + (error || 'unknown'))
+    }
+  }
+
+  async function deleteEnsRecord(name, type, coinType, textKey) {
+    if (!confirm('Delete record for ' + name + ' (' + type + ')?')) return
+    const res = await fetch('/admin/api/ens-records', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, type, coinType, textKey }),
+    })
+    if (res.ok) { toast('Record deleted'); loadEnsRecords() }
+    else toast('Delete failed')
   }
 
   // ── Deploy contracts panel ─────────────────────────────────────────────────

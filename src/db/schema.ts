@@ -38,4 +38,18 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
         ON records (namespace, timestamp);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE IF NOT EXISTS ens_records (
+        name        TEXT    NOT NULL,
+        type        TEXT    NOT NULL,
+        coin_type   INTEGER NOT NULL DEFAULT -1,
+        text_key    TEXT    NOT NULL DEFAULT '',
+        value       TEXT    NOT NULL,
+        modified_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        PRIMARY KEY (name, type, coin_type, text_key)
+      );
+    `,
+  },
 ]
