@@ -1732,6 +1732,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     11155111: {
       attestationIndex: '0x107D706112225aC57eCf6692FBbDC283fb6E3698',
       nodeRegistry:     '0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7',
+      wyriweVerifier:   '0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61',
     },
   }
 
