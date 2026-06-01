@@ -24,7 +24,9 @@ export interface DB {
   insertRecord(record: MeshRecord): Promise<void>
   getRecordsSince(namespace: string, since: number, limit: number, cursor?: string): Promise<MeshRecord[]>
   getRecord(inputHash: string): Promise<MeshRecord | null>
+  getRecentRecords(namespace: string, limit: number): Promise<MeshRecord[]>
   upsertPeer(peer: PeerState): Promise<void>
+  removePeer(url: string): Promise<void>
   getPeers(): Promise<PeerState[]>
   recordCount(namespace: string): Promise<number>
 }

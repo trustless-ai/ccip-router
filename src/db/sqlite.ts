@@ -31,6 +31,8 @@ export class SQLiteDB implements DB {
     upsertPeer: Database.Statement
     getPeers: Database.Statement
     count: Database.Statement
+    recent: Database.Statement
+    removePeer: Database.Statement
     doubleSigns: Database.Statement
   }
 
@@ -88,8 +90,20 @@ export class SQLiteDB implements DB {
         SELECT COUNT(*) as n FROM records WHERE namespace = ?
       `),
 
+      recent: this.db.prepare(`
+        SELECT * FROM records
+        WHERE namespace = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `),
+
+      removePeer: this.db.prepare(`
+        DELETE FROM peers WHERE url = ?
+      `),
+
       // detect two records with same input_hash but different signatures — slashable
-      doubleSigns: this.db.prepare(`
+      // keep these last — doubleSigns must be after recent + removePeer
+    doubleSigns: this.db.prepare(`
         SELECT input_hash FROM records
         WHERE input_hash = @inputHash AND signature != @signature
       `),
@@ -162,6 +176,15 @@ export class SQLiteDB implements DB {
   async recordCount(namespace: string): Promise<number> {
     const row = this.stmts.count.get(namespace) as { n: number }
     return row.n
+  }
+
+  async getRecentRecords(namespace: string, limit: number): Promise<MeshRecord[]> {
+    const rows = this.stmts.recent.all(namespace, limit) as RecordRow[]
+    return rows.map(toMeshRecord)
+  }
+
+  async removePeer(url: string): Promise<void> {
+    this.stmts.removePeer.run(url)
   }
 
   close(): void {

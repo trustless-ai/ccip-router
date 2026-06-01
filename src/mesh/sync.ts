@@ -1,5 +1,19 @@
 import type { DB, MeshRecord, PeerState } from '../db/types.js'
+import type { Config } from '../config.js'
 import { recoverRecordSigner } from '../crypto/index.js'
+
+// Manual sync trigger — used by the admin dashboard "Sync now" button.
+// Mirrors what the cron does on each tick.
+export async function syncAll(config: Config, db: DB): Promise<number> {
+  const peers = await db.getPeers()
+  const results = await Promise.allSettled(
+    peers.map(async (peer) => {
+      const update = await syncPeer(peer, config.syncNamespace, db)
+      await db.upsertPeer({ ...peer, ...update })
+    }),
+  )
+  return results.filter((r) => r.status === 'fulfilled').length
+}
 
 const SUPPORTED_PROTOCOL = 1
 

@@ -9,11 +9,13 @@ import { recordsRouter } from './mesh/records.js'
 import { verifyRouter } from './verify/verify.js'
 import { startSyncCron } from './mesh/cron.js'
 import { setupRouter } from './ui/setup.js'
+import { adminRouter } from './ui/admin.js'
 
 const app = new Hono()
 
 // Setup wizard — shown when node has no gateway key configured
 app.route('/setup', setupRouter)
+app.route('/admin', adminRouter)
 app.get('/', (c) => {
   if (!isConfigured()) return c.redirect('/setup')
   return c.redirect('/admin')
