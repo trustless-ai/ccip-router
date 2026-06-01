@@ -165,6 +165,40 @@ What you get:
 - Admin dashboard at `/admin` with peer management + sync controls
 - Setup wizard at `/setup` on first boot
 
+### ENS — built-in wildcard resolver
+
+`withEns()` decodes `resolve(bytes name, bytes data)` calldata (EIP-137 wildcard pattern), dispatches to a clean handler, and ABI-encodes the response. DNS wire-format, selector dispatch, and null-to-zero-value fallbacks are handled for you.
+
+```typescript
+import { CcipRouter, withEns } from 'ccip-router'
+import type { EnsResolverFn } from 'ccip-router'
+
+const resolver: EnsResolverFn = async (name, record) => {
+  // name   → "vitalik.eth"
+  // record → { type: 'addr' } | { type: 'addr', coinType: 60n }
+  //           { type: 'text', key: 'avatar' } | { type: 'contenthash' }
+  return db.lookup(name, record) // return string or null
+}
+
+const ccip = new CcipRouter({
+  namespace: 'ens-offchain',
+  db,
+  gatewayKey: process.env.GATEWAY_PRIVATE_KEY,
+  resolver: withEns(resolver),
+})
+```
+
+**Standalone mode:** ENS records are managed from the admin panel ("ENS Records" panel — no code required). Any name pointing to this gateway via an on-chain CCIP-Read wildcard resolver is served automatically.
+
+**Compose with attestation:**
+```typescript
+resolver: withWyriwe(withEns(resolver), attestationOpts)
+```
+
+Use `isEnsCalldata(calldata)` to safely gate `withEns()` in a multi-purpose resolver that also handles non-ENS calldata.
+
+---
+
 ### Advanced — wrap any resolver with WYRIWE EIP-712 attestation
 
 ```typescript
@@ -247,7 +281,7 @@ Visit `/admin` after setup. Features:
 - Manual sync trigger
 - Auto-refresh every 15 seconds
 
-**Auth:** If `ADMIN_SECRET` is set, `/admin` requires a login (cookie session, 7-day). API routes also accept `Authorization: Bearer <secret>` for programmatic access.
+**Auth:** Sign in with Ethereum (EIP-4361 SIWE) — your browser wallet signs a message with the gateway key. The authorized signer is whoever holds `GATEWAY_PRIVATE_KEY`. For CLI / scripts: `Authorization: Bearer <ADMIN_SECRET>` still works as a fallback.
 
 **Stack status row:** A compact pill row below the header shows which tiers are active — Signing / ERC-8004 / WYRIWE / OCP — derived from `/admin/api/status`. Green = active, grey = unconfigured.
 
@@ -314,7 +348,7 @@ GET /{sender}/{data}.json
 GET /records?namespace=<str>&since=<unix>&limit=<n>&cursor=<str>
 → {
     protocol: 1,
-    node_version: "0.1.0",
+    node_version: "0.2.0",
     namespace: "agent-attestations",
     records: [{ inputHash, namespace, key, value, timestamp, signature, sourcePeer }],
     cursor: "<next>" | null
