@@ -360,12 +360,12 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 ### Next — UI & node management
 
 **Stack status bar**
-- [ ] Add VNI + On-chain tier pills (tiers exist in API response, never rendered)
-- [ ] Click signer address pill to copy to clipboard
+- [x] Add VNI + On-chain tier pills
+- [x] Click signer address pill to copy to clipboard (green flash feedback)
 
 **Node info & layout**
-- [ ] Move node info bar (Signer / Interval / Version) above the peers/records panels
-- [ ] Toast-based error feedback in add-peer form (replaces `alert()`)
+- [x] Move node info bar above the peers/records panels; add namespace field
+- [x] Toast-based error feedback in add-peer form (replaces `alert()`)
 
 **Node config panel** *(in-dashboard, no env editing required)*
 - [x] Full config panel — Core / Signing / Network / Identity / Chain / Admin sections
@@ -374,14 +374,12 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Auto-discover toggle, seed peers textarea, unsaved-changes indicator
 
 **Wallet & signing**
-- [ ] Signing key management in admin — rotate gateway key, show current signer address + key fingerprint
-- [ ] Key import via paste (hex) or generated fresh — writes to `config.json`, node picks up on next request
-- [ ] Dry-run indicator when no key is configured — clear call to action to generate/import
+- [x] Signing key panel — generate or import, rotate with identity-change warning, `POST /admin/api/key`
+- [x] Dry-run banner — shown when no key configured, "Configure key →" scrolls to key panel
 
 **Setup wizard — node owner onboarding**
-- [ ] Admin secret step during first install — mandatory field, no more open dashboard by default
-- [ ] Signing key step — generate or paste; shown alongside what it protects (records, mesh identity)
-- [ ] Post-setup checklist — shows which tiers are active and what's still missing (links to spec audit)
+- [x] Admin secret as dedicated step 2 — prominent warning box, two-step skip confirmation
+- [x] Post-setup checklist — signing ✓, admin ✓/⚠, WYRIWE/ERC-8004/VNI ○ with next-step hints
 
 ---
 

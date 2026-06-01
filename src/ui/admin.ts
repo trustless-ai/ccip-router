@@ -342,6 +342,29 @@ adminRouter.post('/api/config', async (c) => {
   return c.json({ ok: true })
 })
 
+adminRouter.post('/api/key', async (c) => {
+  const body = await c.req.json<{ gatewayKey: string }>()
+  const key  = body.gatewayKey?.trim()
+  if (!key?.startsWith('0x') || key.length !== 66) {
+    return c.json({ error: 'Invalid key — must be 32-byte hex (0x...)' }, 400)
+  }
+
+  let existing: ConfigFile = {}
+  if (existsSync(CONFIG_FILE_PATH)) {
+    try { existing = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile } catch {}
+  }
+
+  try {
+    writeFileSync(CONFIG_FILE_PATH, JSON.stringify({ ...existing, gatewayKey: key }, null, 2), 'utf8')
+  } catch (err) {
+    return c.json({ error: `Could not write config: ${String(err)}` }, 500)
+  }
+
+  console.log('[config] signing key rotated via admin panel — restarting')
+  setTimeout(() => process.exit(0), 500)
+  return c.json({ ok: true })
+})
+
 // ── Dashboard HTML ────────────────────────────────────────────────────────────
 
 adminRouter.get('/', (c) => c.html(ADMIN_HTML))
@@ -550,10 +573,37 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       background: var(--s1); border: 1px solid var(--border);
       border-radius: 8px; padding: 5px 12px;
       font-size: 12px; color: var(--subtle);
+      transition: background 0.15s, border-color 0.15s;
     }
     .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); flex-shrink: 0; }
     .pill .addr { font-family: var(--mono); color: var(--text); }
     .pill.ns { background: var(--accent-l); border-color: var(--accent-b); color: var(--indigo); }
+    .pill.copyable { cursor: pointer; }
+    .pill.copyable:hover { border-color: var(--border-h); }
+    .pill.copied { background: var(--green-l); border-color: var(--green-b); }
+
+    /* ── Key reveal / addr pill (shared with setup) ── */
+    .key-reveal {
+      background: var(--green-l); border: 1px solid var(--green-b);
+      border-radius: 10px; padding: 14px; margin-top: 14px; display: none;
+    }
+    .key-reveal.show { display: block; }
+    .key-reveal .lbl { font-size: 11px; color: rgba(34,197,94,0.7); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .key-reveal .copy-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .key-reveal .val { font-family: var(--mono); font-size: 11px; color: var(--green); word-break: break-all; }
+    .addr-pill {
+      display: inline-flex; align-items: center;
+      background: var(--accent-l); border: 1px solid var(--accent-b);
+      border-radius: 8px; padding: 5px 10px;
+      font-family: var(--mono); font-size: 11px; color: var(--indigo);
+    }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+    .key-warn-box {
+      background: var(--amber-l); border: 1px solid var(--amber-b);
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 16px;
+      font-size: 12px; color: var(--amber); line-height: 1.55;
+    }
+    .key-warn-box strong { display: block; font-size: 13px; margin-bottom: 4px; }
 
     /* ── Buttons ── */
     .btn {
@@ -855,7 +905,9 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     <div class="logo-name">ccip-router</div>
   </div>
   <div class="header-right">
-    <div class="pill"><div class="dot"></div><span class="addr" id="h-addr">—</span></div>
+    <div class="pill copyable" id="signer-pill" onclick="copySigner()" title="Click to copy address">
+      <div class="dot"></div><span class="addr" id="h-addr">—</span>
+    </div>
     <div class="pill ns" id="h-ns">—</div>
     <button class="btn btn-primary btn-sm" id="btn-sync" onclick="syncNow()">⟳ Sync</button>
     <button class="btn btn-ghost btn-sm" id="btn-logout" style="display:none" onclick="logout()">Sign out</button>
@@ -865,6 +917,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 <div class="warn-banner" id="warn-banner">
   ⚠ Admin is open — anyone who can reach this port has full access.
   Set <code>ADMIN_SECRET</code> in your environment or <a href="/setup">reconfigure</a>.
+</div>
+<div class="warn-banner" id="dryrun-banner" style="background:rgba(99,102,241,0.08);border-bottom-color:rgba(99,102,241,0.2);color:var(--indigo)">
+  ⚡ No signing key configured — records are unsigned (dry-run mode).
+  <button class="btn btn-ghost btn-sm" style="margin-left:auto;border-color:rgba(99,102,241,0.3);color:var(--indigo)" onclick="openKeyPanel()">Configure key →</button>
 </div>
 
 <div class="stack-status" id="stack-status" style="display:none">
@@ -1074,6 +1130,64 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="audit-panel" id="key-panel" style="margin-top:16px">
+    <div class="audit-header" id="key-header" onclick="toggleKeyPanel()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="panel-title">Signing key</div>
+        <span class="tier-pill off" id="key-status-pill" style="font-size:10px;padding:2px 10px">
+          <span class="tp-dot"></span><span id="key-status-text">not configured</span>
+        </span>
+      </div>
+      <span class="audit-chevron" id="key-chevron">▼</span>
+    </div>
+    <div id="key-body" style="display:none">
+      <div class="config-form">
+
+        <div class="config-section">
+          <div class="config-section-title">Current signer</div>
+          <div class="cfg-field">
+            <div class="cfg-readonly">
+              <span id="key-signer-val" style="color:var(--text)">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Rotate key</div>
+          <div class="key-warn-box">
+            <strong>⚠ Rotating changes your node's signing identity</strong>
+            Records previously signed by the old key still verify against the old address.
+            Peers that have pinned your signer will treat new records as a new node until they re-sync.
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-ghost" onclick="generateNewKey()">⚡ Generate new key</button>
+            <button class="btn btn-ghost" onclick="showKeyImport()">↓ Import existing</button>
+          </div>
+          <div class="key-reveal" id="new-key-reveal">
+            <div class="lbl">Private key — save this now, it will not be shown again</div>
+            <div class="copy-row">
+              <div class="val" id="new-key-val"></div>
+              <button class="btn btn-ghost btn-sm" onclick="copyNewKey()">Copy</button>
+            </div>
+            <div id="new-key-addr" class="addr-pill" style="margin-top:10px"></div>
+          </div>
+          <div id="key-import-field" style="display:none;margin-top:12px">
+            <div class="cfg-field">
+              <input type="password" id="import-key-val" placeholder="0x…" style="font-family:var(--mono)" oninput="onKeyImport(this.value)"/>
+              <div id="import-key-addr" class="addr-pill" style="display:none;margin-top:8px">✓ Key accepted</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="config-actions">
+          <span class="note">Saves key to config.json and restarts the node.</span>
+          <button class="btn btn-primary btn-sm" id="btn-key-save" onclick="saveKey()" disabled>Save &amp; restart →</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <div class="toast" id="toast"></div>
@@ -1125,13 +1239,38 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     \`).join('')
   }
 
+  let _signerAddress = null
+
+  function copySigner() {
+    if (!_signerAddress) return
+    navigator.clipboard.writeText(_signerAddress)
+    const pill = document.getElementById('signer-pill')
+    pill.classList.add('copied')
+    setTimeout(() => pill.classList.remove('copied'), 1200)
+    toast('Address copied')
+  }
+
   async function load() {
     const res = await fetch('/admin/api/status')
     if (res.status === 401) { window.location.href = '/admin/login'; return }
     const d = await res.json()
 
+    _signerAddress = d.signerAddress
     document.getElementById('h-addr').textContent = d.signerAddress ? trunc(d.signerAddress, 20) : 'dry-run'
     document.getElementById('h-ns').textContent   = d.namespace
+
+    // Dry-run banner
+    document.getElementById('dryrun-banner').style.display = d.signerAddress ? 'none' : 'flex'
+
+    // Key panel status pill + signer display
+    const kpill = document.getElementById('key-status-pill')
+    if (kpill) {
+      kpill.className = 'tier-pill ' + (d.signerAddress ? 'on' : 'off')
+      document.getElementById('key-status-text').textContent =
+        d.signerAddress ? trunc(d.signerAddress, 16) : 'not configured'
+    }
+    const ksv = document.getElementById('key-signer-val')
+    if (ksv) ksv.textContent = d.signerAddress || 'not configured'
 
     document.getElementById('s-records').textContent  = d.records
     document.getElementById('s-ns-sub').textContent   = d.namespace
@@ -1323,6 +1462,77 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     chevron.className   = 'audit-chevron' + (auditOpen ? ' open' : '')
     header.className    = 'audit-header'  + (auditOpen ? ' open' : '')
     if (auditOpen && !auditLoaded) loadAudit()
+  }
+
+  // ── Key rotation panel ────────────────────────────────────────────────────
+
+  let newGatewayKey = ''
+  let keyPanelOpen  = false
+
+  function openKeyPanel() {
+    if (!keyPanelOpen) toggleKeyPanel()
+    document.getElementById('key-panel').scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function toggleKeyPanel() {
+    keyPanelOpen = !keyPanelOpen
+    const body    = document.getElementById('key-body')
+    const chevron = document.getElementById('key-chevron')
+    const header  = document.getElementById('key-header')
+    body.style.display = keyPanelOpen ? 'block' : 'none'
+    chevron.className  = 'audit-chevron' + (keyPanelOpen ? ' open' : '')
+    header.className   = 'audit-header'  + (keyPanelOpen ? ' open' : '')
+  }
+
+  async function generateNewKey() {
+    newGatewayKey = ''
+    document.getElementById('btn-key-save').disabled = true
+    const res = await fetch('/setup/generate-key')
+    const d   = await res.json()
+    newGatewayKey = d.privateKey
+    document.getElementById('new-key-val').textContent  = d.privateKey
+    document.getElementById('new-key-addr').textContent = d.address
+    document.getElementById('new-key-reveal').classList.add('show')
+    document.getElementById('key-import-field').style.display = 'none'
+    document.getElementById('btn-key-save').disabled = false
+  }
+
+  function copyNewKey() { navigator.clipboard.writeText(newGatewayKey); toast('Key copied') }
+
+  function showKeyImport() {
+    newGatewayKey = ''
+    document.getElementById('key-import-field').style.display = 'block'
+    document.getElementById('new-key-reveal').classList.remove('show')
+    document.getElementById('import-key-val').value = ''
+    document.getElementById('import-key-addr').style.display = 'none'
+    document.getElementById('btn-key-save').disabled = true
+  }
+
+  function onKeyImport(val) {
+    const hex = val.trim()
+    const ok  = hex.startsWith('0x') && hex.length === 66
+    newGatewayKey = ok ? hex : ''
+    document.getElementById('import-key-addr').style.display = ok ? 'inline-flex' : 'none'
+    document.getElementById('btn-key-save').disabled = !ok
+  }
+
+  async function saveKey() {
+    if (!newGatewayKey) return
+    const btn    = document.getElementById('btn-key-save')
+    btn.disabled = true; btn.textContent = 'Saving...'
+    const res  = await fetch('/admin/api/key', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gatewayKey: newGatewayKey }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      btn.disabled = false; btn.textContent = 'Save & restart →'
+      toast('✕ ' + (data.error || 'Save failed'))
+      return
+    }
+    btn.textContent = 'Restarting...'
+    toast('Key saved — restarting node')
+    setTimeout(() => { window.location.href = '/admin' }, 4500)
   }
 
   // ── Node config panel ──────────────────────────────────────────────────────
