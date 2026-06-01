@@ -1,3 +1,6 @@
+import { readFileSync, existsSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 export type Config = {
   port: number
   dbPath: string
@@ -5,6 +8,33 @@ export type Config = {
   peers: string[]
   syncInterval: string              // cron expression
   syncNamespace: string
+}
+
+export type ConfigFile = {
+  gatewayKey?: string
+  namespace?: string
+  syncInterval?: string
+  dbPath?: string
+  port?: number
+  peers?: string[]
+}
+
+export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
+
+function loadConfigFile(): ConfigFile {
+  if (!existsSync(CONFIG_FILE_PATH)) return {}
+  try {
+    return JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile
+  } catch {
+    console.warn(`[config] could not parse ${CONFIG_FILE_PATH} — ignoring`)
+    return {}
+  }
+}
+
+// True if the node has a signing key — either from env or config.json
+export function isConfigured(): boolean {
+  const file = loadConfigFile()
+  return !!(process.env.GATEWAY_PRIVATE_KEY || file.gatewayKey)
 }
 
 function requireHex(key: string, val: string | undefined): `0x${string}` {
@@ -32,13 +62,16 @@ function parsePort(val: string | undefined): number {
 }
 
 export function loadConfig(): Config {
+  const file = loadConfigFile()
+
+  // env vars take precedence over config.json
   const raw = {
-    PORT:                process.env.PORT,
-    DB_PATH:             process.env.DB_PATH,
-    GATEWAY_PRIVATE_KEY: process.env.GATEWAY_PRIVATE_KEY,
-    PEERS:               process.env.PEERS,
-    SYNC_INTERVAL:       process.env.SYNC_INTERVAL,
-    SYNC_NAMESPACE:      process.env.SYNC_NAMESPACE,
+    PORT:                process.env.PORT                ?? String(file.port ?? ''),
+    DB_PATH:             process.env.DB_PATH             ?? file.dbPath,
+    GATEWAY_PRIVATE_KEY: process.env.GATEWAY_PRIVATE_KEY ?? file.gatewayKey,
+    PEERS:               process.env.PEERS               ?? (file.peers ?? []).join(','),
+    SYNC_INTERVAL:       process.env.SYNC_INTERVAL       ?? file.syncInterval,
+    SYNC_NAMESPACE:      process.env.SYNC_NAMESPACE       ?? file.namespace,
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY

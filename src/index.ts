@@ -1,13 +1,31 @@
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { privateKeyToAccount } from 'viem/accounts'
-import { getConfig } from './config.js'
+import { getConfig, isConfigured } from './config.js'
 import { getDB } from './db/index.js'
 import { CcipRouter } from './router/index.js'
 import { withWyriwe } from './attestation/withWyriwe.js'
 import { recordsRouter } from './mesh/records.js'
 import { verifyRouter } from './verify/verify.js'
 import { startSyncCron } from './mesh/cron.js'
+import { setupRouter } from './ui/setup.js'
+
+const app = new Hono()
+
+// Setup wizard — shown when node has no gateway key configured
+app.route('/setup', setupRouter)
+app.get('/', (c) => {
+  if (!isConfigured()) return c.redirect('/setup')
+  return c.redirect('/admin')
+})
+
+// Block all other routes until configured
+app.use('*', async (c, next) => {
+  if (!isConfigured() && !c.req.path.startsWith('/setup')) {
+    return c.redirect('/setup')
+  }
+  await next()
+})
 
 // Boot sequence — config first, then DB, then routes
 const config = getConfig()
@@ -59,8 +77,6 @@ const ccip = new CcipRouter({
   gatewayKey: config.gatewayKey,
   resolver:   async (_sender, _calldata, _namespace) => '0x',
 })
-
-const app = new Hono()
 
 app.route('/', ccip.hono())
 app.route('/records', recordsRouter)
