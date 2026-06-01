@@ -1,4 +1,4 @@
-import { keccak256, toBytes } from 'viem'
+import { keccak256, toBytes, encodeAbiParameters } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { getDB } from '../db/index.js'
 import type { ResolverFn } from '../router/index.js'
@@ -11,39 +11,47 @@ import {
 import { buildCommitmentHash } from './ocp.js'
 
 export type WyriweOpts = {
-  gatewayKey:      `0x${string}`  // hot signing key
-  registryAddress: `0x${string}`  // ERC-8004 registry (verifyingContract in domain)
-  agentId:         `0x${string}`  // bytes32 — ERC-8004 agent identity
-  modelHash:       `0x${string}`  // bytes32 — AI model identifier
-  chainId?:        number         // chain where registry is deployed (default: 1)
-  // sanitizationCID?: string     // future: non-sentinel path
+  gatewayKey:       `0x${string}`  // hot signing key
+  registryAddress:  `0x${string}`  // ERC-8004 registry (verifyingContract in domain)
+  agentId:          `0x${string}`  // bytes32 — ERC-8004 agent identity
+  modelHash:        `0x${string}`  // bytes32 — AI model identifier
+  chainId?:         number         // chain where registry is deployed (default: 1)
+  sanitizationCID?: string         // IPFS CID / URI of sanitization pipeline; omit for sentinel (identity) path
 }
 
 // Advanced tier — wraps any ResolverFn with full WYRIWE attestation production.
 //
-// After every resolver call this produces an EIP-712 WyriweAttestation:
-//   1. rawInputHash             = keccak256(calldata)
-//   2. sanitizationPipelineHash = keccak256("IDENTITY_SENTINEL")  [sentinel path]
-//   3. inputHash                = rawInputHash                     [sentinel path]
-//   4. call resolver → response
-//   5. outputHash               = keccak256(response)
-//   6. sign WyriweAttestation with gatewayKey via EIP-712
-//   7. write attestation record to DB under "{namespace}:wyriwe"
+// Triple-hash chain (two paths):
 //
-// The resolver response is returned unchanged — transparent to CCIP-Read callers.
-// CcipRouter writes the basic signed record; this writes the WYRIWE attestation on top.
+//   Sentinel path (no sanitizationCID):
+//     sanitizationPipelineHash = keccak256("IDENTITY_SENTINEL")
+//     inputHash                = rawInputHash
+//
+//   Non-sentinel path (sanitizationCID provided):
+//     sanitizationPipelineHash = keccak256(sanitizationCID)
+//     inputHash                = keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))
 export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
-  const account       = privateKeyToAccount(opts.gatewayKey)
-  const chainId       = opts.chainId ?? 1
-  const sentinelHash  = keccak256(toBytes(IDENTITY_SENTINEL)) as `0x${string}`
+  const account      = privateKeyToAccount(opts.gatewayKey)
+  const chainId      = opts.chainId ?? 1
+  const sentinelHash = keccak256(toBytes(IDENTITY_SENTINEL)) as `0x${string}`
 
   return async (sender, calldata, namespace) => {
     // ── Triple-hash chain ──────────────────────────────────────────────────
     const rawInputHash = keccak256(calldata)
 
-    // IDENTITY_SENTINEL path — no sanitization pipeline applied
-    const sanitizationPipelineHash = sentinelHash
-    const inputHash                = rawInputHash
+    let sanitizationPipelineHash: `0x${string}`
+    let inputHash: `0x${string}`
+
+    if (opts.sanitizationCID) {
+      sanitizationPipelineHash = keccak256(toBytes(opts.sanitizationCID)) as `0x${string}`
+      inputHash = keccak256(encodeAbiParameters(
+        [{ type: 'bytes32' }, { type: 'bytes32' }],
+        [rawInputHash, sanitizationPipelineHash],
+      )) as `0x${string}`
+    } else {
+      sanitizationPipelineHash = sentinelHash
+      inputHash                = rawInputHash
+    }
 
     // ── Resolver call ──────────────────────────────────────────────────────
     const response = await resolver(sender, calldata, namespace)
@@ -92,8 +100,12 @@ export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
         inputHash:  rawInputHash,
         namespace:  namespace + ':wyriwe',
         key:        rawInputHash,
-        // chainId stored alongside attestation so /verify can reconstruct the EIP-712 domain
-        value:      JSON.stringify({ ...attestation, timestamp: timestamp.toString(), chainId }),
+        // chainId stored so /verify can reconstruct the EIP-712 domain
+        // sanitizationCID stored so /verify can reflect the pipeline used (null = sentinel)
+        value:      JSON.stringify({
+          ...attestation, timestamp: timestamp.toString(), chainId,
+          sanitizationCID: opts.sanitizationCID ?? null,
+        }),
         timestamp:  Number(timestamp),
         signature,
         sourcePeer: null,

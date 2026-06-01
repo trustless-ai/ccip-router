@@ -45,18 +45,20 @@ const ccip = new CcipRouter({
   db,
   gatewayKey: config.gatewayKey,
   resolver: withWyriwe(myAgentResolver, {
-    gatewayKey:      config.gatewayKey,
-    registryAddress: process.env.REGISTRY_ADDRESS as `0x${string}`,
-    agentId:         process.env.AGENT_ID as `0x${string}`,
-    modelHash:       process.env.MODEL_HASH as `0x${string}`,
-    chainId:         1,
+    gatewayKey:       config.gatewayKey,
+    registryAddress:  process.env.REGISTRY_ADDRESS as `0x${string}`,
+    agentId:          process.env.AGENT_ID as `0x${string}`,
+    modelHash:        process.env.MODEL_HASH as `0x${string}`,
+    chainId:          1,
+    // sanitizationCID: 'ipfs://Qm...',  // omit for sentinel (identity) path
   }),
 })
 ```
 
 What `withWyriwe()` adds on top of basic:
-- Triple-hash chain: `rawInputHash → sanitizationPipelineHash → inputHash`
-- `IDENTITY_SENTINEL` path (no sanitization pipeline) fully implemented
+- Triple-hash chain — two paths:
+  - **Sentinel** (default): `sanitizationPipelineHash = keccak256("IDENTITY_SENTINEL")`, `inputHash = rawInputHash`
+  - **Non-sentinel** (`sanitizationCID` set): `sanitizationPipelineHash = keccak256(CID)`, `inputHash = keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))`
 - EIP-712 `WyriweAttestation` signed with the gateway key on every resolver call
 - Attestation records persisted to `{namespace}:wyriwe` — synced by the mesh automatically
 - Verifiable by any peer: recover signer from signature, match against known gateway address
@@ -314,9 +316,11 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Stack status pills in admin header bar — Signing / ERC-8004 / WYRIWE / OCP
 - [x] Library re-export (`src/lib.ts`) — `CcipRouter`, `withWyriwe`, `IdentityOpts`, `WyriweOpts`, `ResolverFn`, DB types
 
+- [x] `withWyriwe()` non-sentinel path — `sanitizationCID` option; `inputHash = keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))`
+- [x] Setup wizard reconfigure flow — pre-fills current config, "Keep existing key", `/setup/current-config` endpoint, inherited admin secret
+
 ### Next
-- [ ] `withWyriwe()` non-sentinel path (sanitization pipeline CID)
-- [ ] Reconfigure flow in setup wizard (edit existing config, not just first-run)
+- [ ] Spec audit panel in admin — explicit per-spec compliance view (EIP-3668, WYRIWE, ERC-8004, OCP)
 
 ### Phase 2
 - [ ] `AttestationIndex.sol` — chain as source of truth, no shared DB

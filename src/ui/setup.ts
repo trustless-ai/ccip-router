@@ -1,9 +1,28 @@
 import { Hono } from 'hono'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
 
 export const setupRouter = new Hono()
+
+// Returns safe current config snapshot for the reconfigure flow — no private key exposed
+setupRouter.get('/current-config', (c) => {
+  if (!existsSync(CONFIG_FILE_PATH)) return c.json({ configured: false })
+  try {
+    const f = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile
+    return c.json({
+      configured:     !!f.gatewayKey,
+      namespace:      f.namespace      ?? 'agent-attestations',
+      port:           f.port           ?? 3000,
+      syncInterval:   f.syncInterval   ?? '*/5 * * * *',
+      dbPath:         f.dbPath         ?? './data.db',
+      hasAdminSecret: !!f.adminSecret,
+      peers:          f.peers          ?? [],
+    })
+  } catch {
+    return c.json({ configured: false })
+  }
+})
 
 setupRouter.get('/generate-key', (c) => {
   const privateKey = generatePrivateKey()
@@ -13,22 +32,40 @@ setupRouter.get('/generate-key', (c) => {
 
 setupRouter.post('/', async (c) => {
   const body = await c.req.json<{
-    gatewayKey: string
-    adminSecret?: string
-    namespace: string
-    syncInterval: string
-    dbPath: string
-    port: number
-    peers: string[]
+    gatewayKey?:     string
+    keepGatewayKey?: boolean
+    adminSecret?:    string
+    namespace:       string
+    syncInterval:    string
+    dbPath:          string
+    port:            number
+    peers:           string[]
   }>()
 
-  if (!body.gatewayKey?.startsWith('0x') || body.gatewayKey.length !== 66) {
+  // Resolve gateway key — either new key or keep existing from config file
+  let gatewayKey: string | undefined
+  if (body.keepGatewayKey) {
+    if (!existsSync(CONFIG_FILE_PATH)) return c.json({ error: 'No existing config to keep key from' }, 400)
+    const existing = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile
+    gatewayKey = existing.gatewayKey
+  } else {
+    gatewayKey = body.gatewayKey
+  }
+
+  if (!gatewayKey?.startsWith('0x') || gatewayKey.length !== 66) {
     return c.json({ error: 'Invalid gateway key — must be 32-byte hex (0x...)' }, 400)
   }
 
+  // If admin secret is blank and we're reconfiguring, keep the existing one
+  let adminSecret: string | undefined = body.adminSecret?.trim() || undefined
+  if (!adminSecret && body.keepGatewayKey && existsSync(CONFIG_FILE_PATH)) {
+    const existing = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile
+    adminSecret = existing.adminSecret
+  }
+
   const config: ConfigFile = {
-    gatewayKey:   body.gatewayKey,
-    adminSecret:  body.adminSecret?.trim() || undefined,
+    gatewayKey,
+    adminSecret,
     namespace:    body.namespace    || 'agent-attestations',
     syncInterval: body.syncInterval || '*/5 * * * *',
     dbPath:       body.dbPath       || './data.db',
@@ -274,8 +311,13 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
       <div class="field">
         <label>Key source</label>
         <div class="btn-row">
+          <button class="btn btn-ghost" id="btn-keep-key" style="display:none" onclick="keepExistingKey()">⟲ Keep existing key</button>
           <button class="btn btn-ghost" onclick="generateKey()">⚡ Generate new key</button>
           <button class="btn btn-ghost" onclick="showImport()">↓ Import existing</button>
+        </div>
+
+        <div id="keep-key-indicator" style="display:none;margin-top:10px">
+          <div class="addr-pill">⟲ Existing signing key will be kept</div>
         </div>
 
         <div class="key-reveal" id="key-reveal">
@@ -331,7 +373,7 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
       <div class="field">
         <label>Admin secret <span class="tag">optional</span></label>
         <input type="password" id="s-admin-secret" placeholder="Leave blank for open access (dev only)"/>
-        <div class="hint">Protects the /admin dashboard. Set a strong secret for any non-local deployment.</div>
+        <div class="hint" id="hint-admin-secret">Protects the /admin dashboard. Set a strong secret for any non-local deployment.</div>
       </div>
 
       <div class="actions">
@@ -357,7 +399,7 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
 
       <div class="actions">
         <button class="btn btn-ghost" onclick="goStep(2)">← Back</button>
-        <button class="btn btn-primary" id="btn-save" onclick="save()">Save &amp; start →</button>
+        <button class="btn btn-primary" id="btn-save" onclick="save()">Save &amp; restart →</button>
       </div>
     </div>
 
@@ -375,6 +417,52 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
 
 <script>
   let gatewayKey = '', gatewayAddr = '', currentStep = 1
+  let reconfigure = false, keepKey = false
+
+  async function init() {
+    const res = await fetch('/setup/current-config')
+    const d   = await res.json()
+    if (!d.configured) return
+
+    reconfigure = true
+
+    // Update logo tag + step-1 title
+    document.querySelector('.logo-tag').textContent          = 'reconfigure'
+    document.getElementById('step-1').querySelector('.card-title').textContent = 'Gateway key'
+    document.getElementById('step-1').querySelector('.card-sub').textContent   =
+      'Keep your existing signing key or replace it with a new one.'
+
+    // Show "Keep existing key" button
+    document.getElementById('btn-keep-key').style.display = 'inline-flex'
+
+    // Pre-fill step 2
+    document.getElementById('s-namespace').value = d.namespace
+    document.getElementById('s-port').value      = d.port
+    document.getElementById('s-interval').value  = d.syncInterval
+    document.getElementById('s-db').value        = d.dbPath
+
+    // Update admin secret hint
+    if (d.hasAdminSecret) {
+      document.getElementById('s-admin-secret').placeholder = 'Leave blank to keep existing secret'
+      document.getElementById('hint-admin-secret').textContent =
+        'Leave blank to keep the existing admin secret, or enter a new one to replace it.'
+    }
+
+    // Pre-fill peers
+    if (d.peers && d.peers.length) {
+      document.getElementById('s-peers').value = d.peers.join('\\n')
+    }
+  }
+
+  function keepExistingKey() {
+    keepKey = true
+    gatewayAddr = '(existing key)'
+    document.getElementById('keep-key-indicator').style.display = 'block'
+    document.getElementById('key-reveal').classList.remove('show')
+    document.getElementById('import-field').style.display = 'none'
+    document.getElementById('key-warn').style.display     = 'none'
+    document.getElementById('btn-next-1').disabled        = false
+  }
 
   function goStep(n) {
     document.getElementById('step-' + currentStep).classList.remove('active')
@@ -389,23 +477,27 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
   }
 
   async function generateKey() {
+    keepKey = false
     const res = await fetch('/setup/generate-key')
     const d   = await res.json()
     gatewayKey = d.privateKey; gatewayAddr = d.address
-    document.getElementById('generated-key').textContent     = d.privateKey
-    document.getElementById('generated-address').textContent = d.address
+    document.getElementById('generated-key').textContent       = d.privateKey
+    document.getElementById('generated-address').textContent   = d.address
     document.getElementById('key-reveal').classList.add('show')
-    document.getElementById('import-field').style.display    = 'none'
-    document.getElementById('key-warn').style.display        = 'block'
-    document.getElementById('btn-next-1').disabled           = false
+    document.getElementById('import-field').style.display      = 'none'
+    document.getElementById('keep-key-indicator').style.display = 'none'
+    document.getElementById('key-warn').style.display          = 'block'
+    document.getElementById('btn-next-1').disabled             = false
   }
 
   function copyKey() { navigator.clipboard.writeText(gatewayKey) }
 
   function showImport() {
-    document.getElementById('import-field').style.display = 'block'
+    keepKey = false
+    document.getElementById('import-field').style.display       = 'block'
     document.getElementById('key-reveal').classList.remove('show')
-    document.getElementById('key-warn').style.display     = 'none'
+    document.getElementById('keep-key-indicator').style.display = 'none'
+    document.getElementById('key-warn').style.display           = 'none'
   }
 
   function onImportKey(val) {
@@ -420,12 +512,12 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
     const peers  = document.getElementById('s-peers').value.split('\\n').map(s=>s.trim()).filter(Boolean)
     const secret = document.getElementById('s-admin-secret').value.trim()
     const rows   = [
-      { k:'Signer address', v: gatewayAddr || '(derived from key)' },
+      { k:'Signer address', v: keepKey ? '(keep existing)' : (gatewayAddr || '(derived from key)') },
       { k:'Namespace',      v: document.getElementById('s-namespace').value },
       { k:'Port',           v: document.getElementById('s-port').value },
       { k:'Sync interval',  v: document.getElementById('s-interval').value },
       { k:'DB path',        v: document.getElementById('s-db').value },
-      { k:'Admin secret',   v: secret ? '●●●●●● (set)' : 'none — open access' },
+      { k:'Admin secret',   v: secret ? '●●●●●● (new)' : (reconfigure ? '(keep existing)' : 'none — open access') },
       { k:'Peers',          v: peers.length ? peers.join(', ') : 'none (standalone)' },
     ]
     document.getElementById('summary').innerHTML = rows.map(r =>
@@ -435,26 +527,30 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
 
   async function save() {
     const btn = document.getElementById('btn-save')
-    btn.disabled = true; btn.textContent = 'Saving...'
+    btn.disabled = true; btn.textContent = reconfigure ? 'Applying...' : 'Saving...'
     const peers  = document.getElementById('s-peers').value.split('\\n').map(s=>s.trim()).filter(Boolean)
     const secret = document.getElementById('s-admin-secret').value.trim()
+    const payload = {
+      keepGatewayKey: keepKey || undefined,
+      gatewayKey:     keepKey ? undefined : gatewayKey,
+      adminSecret:    secret  || undefined,
+      namespace:      document.getElementById('s-namespace').value,
+      syncInterval:   document.getElementById('s-interval').value,
+      dbPath:         document.getElementById('s-db').value,
+      port:           Number(document.getElementById('s-port').value),
+      peers,
+    }
     const res = await fetch('/setup', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        gatewayKey,
-        adminSecret:  secret || undefined,
-        namespace:    document.getElementById('s-namespace').value,
-        syncInterval: document.getElementById('s-interval').value,
-        dbPath:       document.getElementById('s-db').value,
-        port:         Number(document.getElementById('s-port').value),
-        peers,
-      }),
+      body: JSON.stringify(payload),
     })
     const data = await res.json()
-    if (!res.ok) { btn.disabled=false; btn.textContent='Save & start →'; alert(data.error||'Save failed'); return }
+    if (!res.ok) { btn.disabled=false; btn.textContent=reconfigure?'Apply changes →':'Save & start →'; alert(data.error||'Save failed'); return }
     goStep('done')
     setTimeout(() => { window.location.href = '/admin' }, 4000)
   }
+
+  init()
 </script>
 </body>
 </html>`
