@@ -81,7 +81,8 @@ export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
         inputHash:  rawInputHash,
         namespace:  namespace + ':wyriwe',
         key:        rawInputHash,
-        value:      JSON.stringify({ ...attestation, timestamp: timestamp.toString() }),
+        // chainId stored alongside attestation so /verify can reconstruct the EIP-712 domain
+        value:      JSON.stringify({ ...attestation, timestamp: timestamp.toString(), chainId }),
         timestamp:  Number(timestamp),
         signature,
         sourcePeer: null,

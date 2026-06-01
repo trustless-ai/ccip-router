@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3'
-import { SCHEMA } from './schema.js'
+import { SCHEMA, MIGRATIONS } from './schema.js'
 import type { DB, MeshRecord, PeerState } from './types.js'
 
 type RecordRow = {
@@ -28,6 +28,8 @@ export class SQLiteDB implements DB {
     getSince: Database.Statement
     getSinceAfterCursor: Database.Statement
     getOne: Database.Statement
+    getOneNs: Database.Statement
+    getAllByHash: Database.Statement
     upsertPeer: Database.Statement
     getPeers: Database.Statement
     count: Database.Statement
@@ -41,6 +43,7 @@ export class SQLiteDB implements DB {
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
     this.db.exec(SCHEMA)
+    this.runMigrations()
 
     this.stmts = {
       insert: this.db.prepare(`
@@ -70,8 +73,19 @@ export class SQLiteDB implements DB {
         LIMIT @limit
       `),
 
+      // first match across all namespaces (basic tier lookup)
       getOne: this.db.prepare(`
-        SELECT * FROM records WHERE input_hash = ?
+        SELECT * FROM records WHERE input_hash = ? LIMIT 1
+      `),
+
+      // exact match on composite PK
+      getOneNs: this.db.prepare(`
+        SELECT * FROM records WHERE input_hash = ? AND namespace = ?
+      `),
+
+      // all records for an inputHash across every namespace (used by /verify)
+      getAllByHash: this.db.prepare(`
+        SELECT * FROM records WHERE input_hash = ? ORDER BY namespace ASC
       `),
 
       upsertPeer: this.db.prepare(`
@@ -97,26 +111,43 @@ export class SQLiteDB implements DB {
         LIMIT ?
       `),
 
-      removePeer: this.db.prepare(`
-        DELETE FROM peers WHERE url = ?
-      `),
+      removePeer: this.db.prepare(`DELETE FROM peers WHERE url = ?`),
 
-      // detect two records with same input_hash but different signatures — slashable
-      // keep these last — doubleSigns must be after recent + removePeer
-    doubleSigns: this.db.prepare(`
+      // double-sign: same (input_hash, namespace), different signature — slashable
+      doubleSigns: this.db.prepare(`
         SELECT input_hash FROM records
-        WHERE input_hash = @inputHash AND signature != @signature
+        WHERE input_hash = @inputHash
+          AND namespace  = @namespace
+          AND signature != @signature
       `),
+    }
+  }
+
+  // Run pending migrations in order, tracking applied versions in schema_version.
+  private runMigrations() {
+    const applied = this.db
+      .prepare(`SELECT version FROM schema_version ORDER BY version ASC`)
+      .all() as { version: number }[]
+    const appliedVersions = new Set(applied.map((r) => r.version))
+
+    for (const migration of MIGRATIONS) {
+      if (appliedVersions.has(migration.version)) continue
+      console.log(`[db] applying migration v${migration.version}`)
+      this.db.exec(migration.sql)
+      this.db
+        .prepare(`INSERT INTO schema_version (version) VALUES (?)`)
+        .run(migration.version)
     }
   }
 
   async insertRecord(record: MeshRecord): Promise<void> {
     const existing = this.stmts.doubleSigns.get({
       inputHash: record.inputHash,
+      namespace: record.namespace,
       signature: record.signature,
     })
     if (existing) {
-      console.warn(`[double-sign] input_hash=${record.inputHash} — flagged for future slashing`)
+      console.warn(`[double-sign] input_hash=${record.inputHash} ns=${record.namespace} — flagged for future slashing`)
     }
 
     this.stmts.insert.run({
@@ -153,9 +184,16 @@ export class SQLiteDB implements DB {
     return rows.map(toMeshRecord)
   }
 
-  async getRecord(inputHash: string): Promise<MeshRecord | null> {
-    const row = this.stmts.getOne.get(inputHash) as RecordRow | undefined
+  async getRecord(inputHash: string, namespace?: string): Promise<MeshRecord | null> {
+    const row = namespace
+      ? this.stmts.getOneNs.get(inputHash, namespace) as RecordRow | undefined
+      : this.stmts.getOne.get(inputHash) as RecordRow | undefined
     return row ? toMeshRecord(row) : null
+  }
+
+  async getRecordsByInputHash(inputHash: string): Promise<MeshRecord[]> {
+    const rows = this.stmts.getAllByHash.all(inputHash) as RecordRow[]
+    return rows.map(toMeshRecord)
   }
 
   async upsertPeer(peer: PeerState): Promise<void> {

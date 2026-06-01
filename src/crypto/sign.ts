@@ -1,6 +1,7 @@
-import { recoverMessageAddress } from 'viem'
+import { recoverMessageAddress, recoverTypedDataAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { hashRecordPayload } from './hash.js'
+import { buildDomain, WYRIWE_TYPES } from '../attestation/eip712.js'
 import type { MeshRecord } from '../db/types.js'
 
 // Sign a record payload with the gateway hot key.
@@ -43,5 +44,45 @@ export async function verifyRecord(
     return signer.toLowerCase() === expectedSigner.toLowerCase()
   } catch {
     return false
+  }
+}
+
+// Recover signer from a WYRIWE attestation record (EIP-712 signed).
+// The record value must be the JSON produced by withWyriwe() — includes chainId.
+// Returns null if the record is malformed or missing required fields.
+export async function recoverWyriweAttestation(
+  record: MeshRecord,
+): Promise<`0x${string}` | null> {
+  try {
+    const att = JSON.parse(record.value) as {
+      agentId: `0x${string}`
+      registry: `0x${string}`
+      modelHash: `0x${string}`
+      rawInputHash: `0x${string}`
+      sanitizationPipelineHash: `0x${string}`
+      inputHash: `0x${string}`
+      outputHash: `0x${string}`
+      timestamp: string
+      chainId: number
+    }
+
+    return recoverTypedDataAddress({
+      domain:      buildDomain(att.chainId, att.registry),
+      types:       WYRIWE_TYPES,
+      primaryType: 'WyriweAttestation',
+      message: {
+        agentId:                  att.agentId,
+        registry:                 att.registry,
+        modelHash:                att.modelHash,
+        rawInputHash:             att.rawInputHash,
+        sanitizationPipelineHash: att.sanitizationPipelineHash,
+        inputHash:                att.inputHash,
+        outputHash:               att.outputHash,
+        timestamp:                BigInt(att.timestamp),
+      },
+      signature: record.signature as `0x${string}`,
+    })
+  } catch {
+    return null
   }
 }

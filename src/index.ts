@@ -82,9 +82,10 @@ const ccip = new CcipRouter({
   resolver:   async (_sender, _calldata, _namespace) => '0x',
 })
 
-app.route('/', ccip.hono())
+// Specific named routes must be registered before the CCIP wildcard /:sender/:data
 app.route('/records', recordsRouter)
 app.route('/verify', verifyRouter)
+app.route('/', ccip.hono())
 
 app.get('/health', async (c) => {
   const [peers, count] = await Promise.all([

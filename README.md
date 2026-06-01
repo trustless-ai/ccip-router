@@ -181,7 +181,31 @@ GET /records?namespace=<str>&since=<unix>&limit=<n>&cursor=<str>
 ### Attestation lookup
 ```
 GET /verify/:inputHash
-→ { inputHash, found: true, record: { ... } }
+→ {
+    inputHash,
+    found: true,
+    proofs: [
+      {
+        namespace:   "agent-attestations",
+        signingType: "EIP-191",
+        verified:    true,
+        signer:      "0x...",
+        signature:   "0x...",
+        timestamp:   1234567890,
+        sourcePeer:  null | "https://..."
+      },
+      {
+        namespace:   "agent-attestations:wyriwe",
+        signingType: "EIP-712 WyriweAttestation",
+        verified:    true,
+        signer:      "0x...",
+        signature:   "0x...",
+        timestamp:   1234567890,
+        attestation: { agentId, registry, modelHash, rawInputHash,
+                       sanitizationPipelineHash, inputHash, outputHash }
+      }
+    ]
+  }
 → { inputHash, found: false }   (404)
 ```
 
@@ -238,17 +262,18 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 
 ### Done
 - [x] CCIP-Read gateway (EIP-3668)
-- [x] SQLite record store — WAL mode, dedup on `inputHash`, cursor pagination
+- [x] SQLite record store — WAL mode, composite PK `(inputHash, namespace)`, cursor pagination
+- [x] DB versioned migrations (`schema_version` table, v1 applied on first boot)
 - [x] EIP-191 signed records (basic tier)
 - [x] Mesh peer sync with protocol version check
 - [x] Setup wizard (`/setup`) — key generation, config.json persistence
 - [x] Admin dashboard (`/admin`) — peers, records, sync
 - [x] Admin auth — cookie session + Bearer token (`ADMIN_SECRET`)
 - [x] `withWyriwe()` — EIP-712 attestation, triple-hash chain, IDENTITY_SENTINEL path
+- [x] `/verify` — clean proof per namespace: `{ verified, signer, signingType, signature, attestation }`
 - [x] Router SVG favicon, dinamic.eth design language
 
 ### Next
-- [ ] `/verify` — clean proof response (`{ signer, signature, verified }` + signature recovery)
 - [ ] ERC-8004 identity block in `CcipRouterOptions` (`agentId`, `registryAddress`)
 - [ ] OCP / ERC-8263 observation commitment hash in attestation
 - [ ] Peer signer pinning — reject records with unexpected signer after first sync

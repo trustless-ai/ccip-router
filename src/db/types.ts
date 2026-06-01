@@ -23,7 +23,8 @@ export type PeerState = {
 export interface DB {
   insertRecord(record: MeshRecord): Promise<void>
   getRecordsSince(namespace: string, since: number, limit: number, cursor?: string): Promise<MeshRecord[]>
-  getRecord(inputHash: string): Promise<MeshRecord | null>
+  getRecord(inputHash: string, namespace?: string): Promise<MeshRecord | null>
+  getRecordsByInputHash(inputHash: string): Promise<MeshRecord[]>
   getRecentRecords(namespace: string, limit: number): Promise<MeshRecord[]>
   upsertPeer(peer: PeerState): Promise<void>
   removePeer(url: string): Promise<void>
