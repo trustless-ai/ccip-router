@@ -21,6 +21,7 @@
     "dist/lib.js.map",
     "dist/lib.d.ts",
     "dist/lib.d.ts.map",
+    "dist/ens",
     "dist/mesh",
     "dist/router",
     "contracts/IAttestationVerifier.sol",

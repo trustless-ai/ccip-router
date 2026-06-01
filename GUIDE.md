@@ -109,6 +109,52 @@ This switches to the **non-sentinel path**: `inputHash = keccak256(abi.encode(ra
 
 ---
 
+## ENS wildcard resolution
+
+`withEns()` decodes ENS `resolve(bytes name, bytes data)` calldata (EIP-137 wildcard pattern) and calls your resolver with a clean `(name, record)` interface. It handles DNS wire-format decoding, selector dispatch, and ABI encoding — you just return the value.
+
+```typescript
+import { CcipRouter, withEns } from 'ccip-router'
+import type { EnsResolverFn } from 'ccip-router'
+
+const myResolver: EnsResolverFn = async (name, record) => {
+  // name  → "vitalik.eth", "sub.name.eth", etc.
+  // record → { type: 'addr' }
+  //           { type: 'addr', coinType: 60n }
+  //           { type: 'text', key: 'avatar' }
+  //           { type: 'contenthash' }
+
+  if (record.type === 'addr') {
+    return db.getAddress(name)         // return "0x..." or null
+  }
+  if (record.type === 'text') {
+    return db.getText(name, record.key) // return string or null
+  }
+  if (record.type === 'contenthash') {
+    return db.getContenthash(name)     // return "0x..." or null
+  }
+  return null  // not found — withEns returns the zero value for each type
+}
+
+const ccip = new CcipRouter({
+  namespace:  'ens-offchain',
+  gatewayKey: process.env.GATEWAY_PRIVATE_KEY as `0x${string}`,
+  resolver:   withEns(myResolver),
+})
+```
+
+**Null returns:** `withEns` maps `null` to the right zero value per record type — zero address for `addr`, empty string for `text`, `0x` for `contenthash`.
+
+**Unknown selectors:** any inner call selector not in the ENS spec returns `0x` rather than throwing.
+
+**Composing with attestation:** put `withEns` inside `withWyriwe` so the attestation captures the raw ENS calldata hash:
+
+```typescript
+resolver: withWyriwe(withEns(myResolver), attestationOpts)
+```
+
+---
+
 ## Run a standalone node
 
 The fastest way to run a full node with admin UI, setup wizard, peer sync, and all features wired up:
@@ -252,13 +298,17 @@ Never use Hardhat dev keys (`0xac0974...`) outside local testing.
 import {
   CcipRouter,           // core gateway class
   withWyriwe,           // attestation wrapper
+  withEns,              // ENS resolve(bytes,bytes) decoder wrapper
   publishAttestation,   // push a record to AttestationIndex
   checkOnChain,         // query AttestationIndex by inputHash
   registerNode,         // call NodeRegistry.register()
   makeVni,              // produce a signed VNI document
   verifyVni,            // verify a VNI document
+  encodeDnsName,        // DNS wire-format encoder
+  decodeDnsName,        // DNS wire-format decoder
   ATTESTATION_INDEX_ABI,
   NODE_REGISTRY_ABI,
+  WYRIWE_ATTESTATION_VERIFIER_ABI,
 } from 'ccip-router'
 ```
 
