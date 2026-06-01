@@ -1,9 +1,23 @@
 import { Hono } from 'hono'
 import { writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
 
 export const setupRouter = new Hono()
+
+// Spawn a fresh process from the same entry point, then exit.
+// Works for `node dist/index.js` (direct) and `npm start`.
+function restartProcess(): void {
+  const [bin, ...args] = process.argv
+  const child = spawn(bin, args, {
+    detached: true,
+    stdio:    'inherit',
+    env:      process.env,
+  })
+  child.unref()
+  process.exit(0)
+}
 
 // Returns safe current config snapshot for the reconfigure flow — no private key exposed
 setupRouter.get('/current-config', (c) => {
@@ -79,7 +93,7 @@ setupRouter.post('/', async (c) => {
     return c.json({ error: `Could not write config: ${String(err)}` }, 500)
   }
 
-  setTimeout(() => process.exit(0), 500)
+  setTimeout(() => restartProcess(), 500)
   return c.json({ ok: true })
 })
 
@@ -575,13 +589,13 @@ const SETUP_HTML = /* html */`<!DOCTYPE html>
 
   function buildChecklist(secret) {
     const items = [
-      { ok: true,  warn: false, icon: '✓', label: 'Signing key', hint: 'Gateway key configured — records will be EIP-191 signed.' },
+      { ok: true, warn: false, icon: '✓', label: 'Signing key', hint: 'Gateway key configured — records will be EIP-191 signed.' },
       {
-        ok:   !!secret,
-        warn: !secret,
-        icon: secret ? '✓' : '⚠',
-        label: secret ? 'Admin access secured' : 'Admin dashboard is open',
-        hint:  secret ? 'Dashboard protected by admin secret.' : 'Set ADMIN_SECRET in your env or reconfigure to lock it down.',
+        ok:   true,
+        warn: false,
+        icon: '✓',
+        label: 'Admin wallet — claim on first login',
+        hint:  'Open the admin panel, connect any MetaMask wallet and sign once — that wallet becomes the permanent admin. ' + (secret ? 'Bearer secret also configured as CLI fallback.' : ''),
       },
       { ok: false, warn: false, icon: '○', label: 'WYRIWE attestation', hint: 'Wrap your resolver with withWyriwe() to enable EIP-712 attestations.' },
       { ok: false, warn: false, icon: '○', label: 'ERC-8004 identity',  hint: 'Set AGENT_ID + REGISTRY_ADDRESS to declare on-chain agent identity.' },

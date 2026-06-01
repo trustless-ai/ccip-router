@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { privateKeyToAccount } from 'viem/accounts'
 import { getConfig, setAdminAddress, CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
 import { getDB } from '../db/index.js'
@@ -11,6 +12,13 @@ import { publishAttestation, type ChainOpts } from '../chain/publish.js'
 import { registerNode } from '../chain/register.js'
 
 export const adminRouter = new Hono()
+
+function restartProcess(): void {
+  const [bin, ...args] = process.argv
+  const child = spawn(bin, args, { detached: true, stdio: 'inherit', env: process.env })
+  child.unref()
+  process.exit(0)
+}
 
 // Auth middleware — applies to every /admin/* route.
 // Admin wallet = adminAddress in config (claimed on first SIWE login, decoupled from gatewayKey).
@@ -415,7 +423,7 @@ adminRouter.post('/api/config', async (c) => {
   }
 
   console.log('[config] updated via admin panel — restarting')
-  setTimeout(() => process.exit(0), 500)
+  setTimeout(() => restartProcess(), 500)
   return c.json({ ok: true })
 })
 
@@ -438,7 +446,7 @@ adminRouter.post('/api/key', async (c) => {
   }
 
   console.log('[config] signing key rotated via admin panel — restarting')
-  setTimeout(() => process.exit(0), 500)
+  setTimeout(() => restartProcess(), 500)
   return c.json({ ok: true })
 })
 
