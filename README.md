@@ -6,6 +6,8 @@ EIP-3668 defines how clients talk to CCIP-Read gateways. It says nothing about h
 
 No ENS required. No agents required. Any CCIP-Read project can plug in a resolver and get a mesh-ready gateway in minutes.
 
+**→ [Integration guide](GUIDE.md)** — install, quickstart, attestation setup, contracts, mesh join.
+
 ---
 
 ## Architecture
