@@ -99,6 +99,8 @@ npm run dev
 | `AGENT_ID` | No | — | ERC-8004 agent identity (bytes32 hex). Enables `/identity` endpoint. |
 | `REGISTRY_ADDRESS` | No | — | ERC-8004 on-chain registry address. Required alongside `AGENT_ID`. |
 | `CHAIN_ID` | No | `1` | Chain where the ERC-8004 registry is deployed. |
+| `ATTESTATION_INDEX` | No | — | Deployed `AttestationIndex` contract address. Enables on-chain anchoring. |
+| `RPC_URL` | No | — | JSON-RPC endpoint. Required alongside `ATTESTATION_INDEX`. |
 
 \* Can also come from `config.json` written by the setup wizard.
 
@@ -253,7 +255,11 @@ GET /health
 ```
 GET  /admin/api/status          node info, peers, recent records, tiers
 GET  /admin/api/logs            last 200 log lines [{ ts, level, msg }]
+GET  /admin/api/audit           per-spec compliance report (EIP-3668/WYRIWE/ERC-8004/OCP)
 POST /admin/api/sync            trigger immediate peer sync
+POST /admin/api/publish         batch-publish recent WYRIWE records to AttestationIndex
+                                  body: { limit?: number }  (default 50, max 200)
+                                  → { published, skipped, errors }
 POST /admin/api/peers           { url } — add peer
 DEL  /admin/api/peers           { url } — remove peer
 POST /admin/login               { secret } — set session cookie
@@ -320,10 +326,13 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Setup wizard reconfigure flow — pre-fills current config, "Keep existing key", `/setup/current-config` endpoint, inherited admin secret
 
 - [x] Spec audit accordion panel in admin — per-spec cards (EIP-3668 / WYRIWE / ERC-8004 / OCP), inline summary pills, expandable detail grid with missing-config hints
+- [x] `contracts/AttestationIndex.sol` — on-chain anchor for WyriweAttestations; verifies EIP-712 sig against ERC-8004 registry domain, stores `signerOf[commitmentHash]` + `commitmentOf[inputHash]`
+- [x] `src/chain/` — viem public + wallet clients, `publishAttestation()`, `checkOnChain()`
+- [x] `/verify` on-chain fallback — if `inputHash` not in local DB and `ATTESTATION_INDEX` + `RPC_URL` configured, queries contract and returns on-chain proof
+- [x] `POST /admin/api/publish` — batch-publish recent WYRIWE records to `AttestationIndex`; skips already-anchored; "Publish to chain" button in spec audit panel
 
-### Next
-- [ ] `AttestationIndex.sol` — chain as source of truth, no shared DB
-- [ ] `/verify` on-chain fallback
+### Phase 3
+- [ ] Open node network, VNI integration, ERC-8275 economics
 
 ### Phase 2
 - [ ] `AttestationIndex.sol` — chain as source of truth, no shared DB

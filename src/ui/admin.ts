@@ -5,6 +5,7 @@ import { getDB } from '../db/index.js'
 import { syncAll } from '../mesh/sync.js'
 import { getLogs } from '../log.js'
 import { requireAdmin, setAdminSession, clearAdminSession } from './auth.js'
+import { publishAttestation, type ChainOpts } from '../chain/publish.js'
 
 export const adminRouter = new Hono()
 
@@ -81,8 +82,9 @@ adminRouter.get('/api/audit', async (c) => {
     db.recordCount(config.syncNamespace),
     db.recordCount(config.syncNamespace + ':wyriwe'),
   ])
-  const erc8004On = !!(config.agentId && config.registryAddress)
-  const wyriweOn  = wyriweCount > 0
+  const erc8004On  = !!(config.agentId && config.registryAddress)
+  const wyriweOn   = wyriweCount > 0
+  const chainOn    = !!(config.attestationIndex && config.rpcUrl)
 
   return c.json({ specs: [
     {
@@ -100,17 +102,18 @@ adminRouter.get('/api/audit', async (c) => {
       key: 'wyriwe', name: 'WYRIWE', label: 'Input Attestation',
       status: wyriweOn ? 'pass' : 'inactive',
       description: 'Triple-hash input provenance. EIP-712 WyriweAttestation signed and persisted on every resolver call.',
+      action: wyriweOn && chainOn ? 'publish' : null,
       details: wyriweOn
         ? [
-            { k: 'Path',       v: 'sentinel (IDENTITY_SENTINEL)' },
-            { k: 'Records',    v: String(wyriweCount) },
-            { k: 'Namespace',  v: config.syncNamespace + ':wyriwe' },
-            { k: 'Signing',    v: 'EIP-712 WyriweAttestation' },
-            { k: 'Hash chain', v: 'rawInputHash → sanitizationPipelineHash → inputHash' },
+            { k: 'Path',      v: 'sentinel (IDENTITY_SENTINEL)' },
+            { k: 'Records',   v: String(wyriweCount) },
+            { k: 'Namespace', v: config.syncNamespace + ':wyriwe' },
+            { k: 'Signing',   v: 'EIP-712 WyriweAttestation' },
+            { k: 'On-chain',  v: chainOn ? `${config.attestationIndex} (chain ${config.chainId})` : 'not configured — set ATTESTATION_INDEX + RPC_URL' },
           ]
         : [
-            { k: 'Missing',    v: 'withWyriwe() not active — 0 attestation records', warn: true },
-            { k: 'Enable',     v: 'Wrap your resolver with withWyriwe(resolver, opts)' },
+            { k: 'Missing',   v: 'withWyriwe() not active — 0 attestation records', warn: true },
+            { k: 'Enable',    v: 'Wrap your resolver with withWyriwe(resolver, opts)' },
           ],
     },
     {
@@ -138,6 +141,8 @@ adminRouter.get('/api/audit', async (c) => {
             { k: 'Records',    v: String(wyriweCount) },
             { k: 'Endpoint',   v: '/ocp/:inputHash' },
             { k: 'Commitment', v: 'keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))' },
+            { k: 'Contract',   v: chainOn ? config.attestationIndex! : 'not deployed — set ATTESTATION_INDEX' },
+            { k: '/verify',    v: chainOn ? 'on-chain fallback active' : 'local DB only' },
           ]
         : [
             { k: 'Missing',    v: 'Requires WYRIWE to be active', warn: true },
@@ -152,6 +157,39 @@ adminRouter.post('/api/sync', async (c) => {
   const db     = getDB()
   const synced = await syncAll(config, db)
   return c.json({ ok: true, synced })
+})
+
+adminRouter.post('/api/publish', async (c) => {
+  const config = getConfig()
+  if (!config.attestationIndex || !config.rpcUrl || !config.gatewayKey) {
+    return c.json({ error: 'ATTESTATION_INDEX, RPC_URL, and GATEWAY_PRIVATE_KEY required' }, 400)
+  }
+  const db   = getDB()
+  const body = await c.req.json<{ limit?: number }>().catch(() => ({ limit: undefined }))
+  const limit  = Math.min(body.limit ?? 50, 200)
+  const records = await db.getRecentRecords(config.syncNamespace + ':wyriwe', limit)
+
+  const opts: ChainOpts = {
+    rpcUrl:          config.rpcUrl,
+    chainId:         config.chainId,
+    gatewayKey:      config.gatewayKey,
+    contractAddress: config.attestationIndex,
+  }
+
+  const results = await Promise.allSettled(records.map((r) => publishAttestation(r, opts)))
+  let published = 0, skipped = 0
+  const errors: string[] = []
+  for (const r of results) {
+    if (r.status === 'fulfilled') {
+      if (r.value.status === 'published') published++
+      else if (r.value.status === 'skipped') skipped++
+      else errors.push(r.value.reason)
+    } else {
+      errors.push(String(r.reason))
+    }
+  }
+  console.log(`[publish] ${published} anchored, ${skipped} already on-chain, ${errors.length} errors`)
+  return c.json({ ok: true, published, skipped, errors })
 })
 
 adminRouter.post('/api/peers', async (c) => {
@@ -902,8 +940,29 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
             </div>
           \`).join('')}
         </div>
+        \${s.action === 'publish' ? \`
+          <button class="btn btn-ghost btn-sm" id="btn-publish" style="margin-top:12px;width:100%" onclick="publishToChain()">
+            ↑ Publish to chain
+          </button>
+        \` : ''}
       </div>
     \`).join('')
+  }
+
+  async function publishToChain() {
+    const btn = document.getElementById('btn-publish')
+    if (!btn) return
+    btn.disabled = true; btn.textContent = '↑ Publishing...'
+    try {
+      const res  = await fetch('/admin/api/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      const data = await res.json()
+      if (!res.ok) { toast(data.error || 'Publish failed'); return }
+      toast(\`↑ \${data.published} anchored · \${data.skipped} already on-chain\`)
+    } catch (e) {
+      toast('Publish error: ' + e.message)
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '↑ Publish to chain' }
+    }
   }
 
   function toggleAudit() {

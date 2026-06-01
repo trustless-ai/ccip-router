@@ -13,6 +13,9 @@ export type Config = {
   agentId:         `0x${string}` | null
   registryAddress: `0x${string}` | null
   chainId:         number
+  // Phase 2 on-chain anchoring — optional
+  attestationIndex: `0x${string}` | null  // deployed AttestationIndex contract
+  rpcUrl:           string | null          // JSON-RPC endpoint for reads + writes
 }
 
 export type ConfigFile = {
@@ -27,6 +30,9 @@ export type ConfigFile = {
   agentId?: string
   registryAddress?: string
   chainId?: number
+  // Phase 2
+  attestationIndex?: string
+  rpcUrl?: string
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -86,6 +92,8 @@ export function loadConfig(): Config {
     AGENT_ID:            process.env.AGENT_ID            ?? file.agentId,
     REGISTRY_ADDRESS:    process.env.REGISTRY_ADDRESS    ?? file.registryAddress,
     CHAIN_ID:            process.env.CHAIN_ID            ?? String(file.chainId ?? ''),
+    ATTESTATION_INDEX:   process.env.ATTESTATION_INDEX   ?? file.attestationIndex,
+    RPC_URL:             process.env.RPC_URL             ?? file.rpcUrl,
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -117,17 +125,29 @@ export function loadConfig(): Config {
     console.log(`[config] identity:  agentId=${agentId.slice(0, 10)}... registry=${registryAddress ?? 'unset'} chainId=${chainId}`)
   }
 
+  const attestationIndex = raw.ATTESTATION_INDEX?.trim()
+    ? requireHex('ATTESTATION_INDEX', raw.ATTESTATION_INDEX.trim())
+    : null
+
+  const rpcUrl = raw.RPC_URL?.trim() || null
+
+  if (attestationIndex) {
+    console.log(`[config] chain:     attestationIndex=${attestationIndex} rpcUrl=${rpcUrl ?? 'unset'}`)
+  }
+
   return {
-    port:            parsePort(raw.PORT),
-    dbPath:          raw.DB_PATH ?? './data.db',
+    port:             parsePort(raw.PORT),
+    dbPath:           raw.DB_PATH ?? './data.db',
     gatewayKey,
     adminSecret,
     peers,
-    syncInterval:    raw.SYNC_INTERVAL ?? '*/5 * * * *',
-    syncNamespace:   raw.SYNC_NAMESPACE ?? 'agent-attestations',
+    syncInterval:     raw.SYNC_INTERVAL ?? '*/5 * * * *',
+    syncNamespace:    raw.SYNC_NAMESPACE ?? 'agent-attestations',
     agentId,
     registryAddress,
     chainId,
+    attestationIndex,
+    rpcUrl,
   }
 }
 

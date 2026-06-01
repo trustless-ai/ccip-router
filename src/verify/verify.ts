@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import { getDB } from '../db/index.js'
+import { getConfig } from '../config.js'
 import { recoverRecordSigner, recoverWyriweAttestation } from '../crypto/sign.js'
+import { checkOnChain } from '../chain/publish.js'
 
 export const verifyRouter = new Hono()
 
@@ -15,7 +17,32 @@ verifyRouter.get('/:inputHash', async (c) => {
   const records = await db.getRecordsByInputHash(inputHash)
 
   if (!records.length) {
-    // TODO Phase 2: fall back to on-chain AttestationIndex lookup
+    const config = getConfig()
+    if (config.attestationIndex && config.rpcUrl) {
+      try {
+        const onChain = await checkOnChain(inputHash, {
+          rpcUrl:          config.rpcUrl,
+          chainId:         config.chainId,
+          contractAddress: config.attestationIndex,
+        })
+        if (onChain.found) {
+          return c.json({
+            inputHash, found: true,
+            proofs: [{
+              namespace:       'on-chain',
+              signingType:     'EIP-712 WyriweAttestation (on-chain)',
+              verified:        true,
+              signer:          onChain.signer,
+              commitmentHash:  onChain.commitmentHash,
+              source:          'AttestationIndex',
+              contractAddress: config.attestationIndex,
+            }],
+          })
+        }
+      } catch (err) {
+        console.warn(`[verify] on-chain lookup failed for ${inputHash}: ${String(err)}`)
+      }
+    }
     return c.json({ inputHash, found: false }, 404)
   }
 
