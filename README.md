@@ -33,22 +33,64 @@ npm install
 npm run dev
 ```
 
-## Two-node test (Docker)
+## Two-node test
 
-Spins up node-a (:3001) and node-b (:3002) pointing at each other as peers.
-Uses Hardhat dev keys — safe for local testing only.
+Both methods spin up node-a (:3001) and node-b (:3002) pointing at each other as peers.
+Uses Hardhat dev keys — safe for local testing only, never use in production.
+
+### Option A — two terminals (no Docker)
+
+**Terminal 1 — node A**
+```bash
+PORT=3001 DB_PATH=./node-a.db \
+GATEWAY_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+PEERS=http://localhost:3002 SYNC_INTERVAL="*/1 * * * *" \
+npm run dev
+```
+
+**Terminal 2 — node B**
+```bash
+PORT=3002 DB_PATH=./node-b.db \
+GATEWAY_PRIVATE_KEY=0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d \
+PEERS=http://localhost:3001 SYNC_INTERVAL="*/1 * * * *" \
+npm run dev
+```
+
+### Option B — Docker
 
 ```bash
 docker compose up --build
+```
 
-# node-a health
+### Verify the mesh
+
+```bash
+# write a record to node A via the CCIP handler
+curl http://localhost:3001/0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266/0xdeadbeef
+
+# check node A has it
 curl http://localhost:3001/health
 
-# node-b health
+# wait ~1 minute for the sync cron to fire, then check node B
 curl http://localhost:3002/health
+# records: 1 — synced from node A
 
-# after a sync tick (~1 min), records written on node-a appear on node-b:
+# verify by inputHash on node B
+# inputHash = keccak256(0xdeadbeef) = 0x...
 curl http://localhost:3002/verify/<inputHash>
+```
+
+Expected node B `/health` after sync:
+```json
+{
+  "records": 1,
+  "peers": [{
+    "url": "http://localhost:3001",
+    "healthy": true,
+    "signerAddress": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    "lastSyncAt": 1780311900
+  }]
+}
 ```
 
 ---
