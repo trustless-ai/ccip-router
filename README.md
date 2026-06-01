@@ -113,6 +113,10 @@ Visit `/admin` after setup. Features:
 
 **Auth:** If `ADMIN_SECRET` is set, `/admin` requires a login (cookie session, 7-day). API routes also accept `Authorization: Bearer <secret>` for programmatic access.
 
+**Stack status row:** A compact pill row below the header shows which tiers are active — Signing / ERC-8004 / WYRIWE / OCP — derived from `/admin/api/status`. Green = active, grey = unconfigured.
+
+**Node logs panel:** Live ring buffer of the last 200 log lines (info/warn/error), colour-coded. Auto-refreshes every 10 seconds.
+
 ---
 
 ## Two-node local test
@@ -235,12 +239,18 @@ GET /identity
 ### Health
 ```
 GET /health
-→ { ok, version, namespace, signerAddress, identity: { agentId, registryAddress, chainId } | null, peers, records }
+→ {
+    ok, version, namespace, signerAddress,
+    identity: { agentId, registryAddress, chainId } | null,
+    tiers: { signed, erc8004, wyriwe, ocp },
+    peers, records
+  }
 ```
 
 ### Admin API (requires auth if ADMIN_SECRET set)
 ```
-GET  /admin/api/status          node info, peers, recent records
+GET  /admin/api/status          node info, peers, recent records, tiers
+GET  /admin/api/logs            last 200 log lines [{ ts, level, msg }]
 POST /admin/api/sync            trigger immediate peer sync
 POST /admin/api/peers           { url } — add peer
 DEL  /admin/api/peers           { url } — remove peer
@@ -297,15 +307,16 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] ERC-8004 identity — `AGENT_ID` + `REGISTRY_ADDRESS` + `CHAIN_ID`, `/identity` endpoint, `/health` field
 - [x] OCP / ERC-8263 — `commitmentHash` in `WyriweAttestation`, `/ocp/:inputHash` endpoint
 - [x] Router SVG favicon, dinamic.eth design language
+- [x] Peer signer pinning — reject records with unexpected signer after first sync
+- [x] Peer health polling — fetch `/health` after every sync, populate `nodeVersion` + `signerAddress`
+- [x] Graceful shutdown — `SIGTERM`/`SIGINT` → `server.close()` → `db.close()` → `process.exit(0)`
+- [x] In-memory log ring buffer (200 lines, console-patched) → `/admin/api/logs` + colour-coded log panel
+- [x] Stack status pills in admin header bar — Signing / ERC-8004 / WYRIWE / OCP
+- [x] Library re-export (`src/lib.ts`) — `CcipRouter`, `withWyriwe`, `IdentityOpts`, `WyriweOpts`, `ResolverFn`, DB types
 
 ### Next
-- [ ] Peer signer pinning — reject records with unexpected signer after first sync
-- [ ] Peer health polling (dedicated `/health` fetch loop, separate from sync)
-- [ ] Graceful shutdown (SIGTERM → flush WAL)
-- [ ] DB versioned migrations (`schema_version` table)
-- [ ] In-memory log buffer → `/admin/api/logs` + log panel in dashboard
-- [ ] Top-level `index.ts` re-export (library mode)
 - [ ] `withWyriwe()` non-sentinel path (sanitization pipeline CID)
+- [ ] Reconfigure flow in setup wizard (edit existing config, not just first-run)
 
 ### Phase 2
 - [ ] `AttestationIndex.sol` — chain as source of truth, no shared DB

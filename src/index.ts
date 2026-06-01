@@ -1,3 +1,4 @@
+import './log.js'  // activate console ring buffer before anything else
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -100,9 +101,10 @@ app.route('/ocp', ocpRouter)
 app.route('/', ccip.hono())
 
 app.get('/health', async (c) => {
-  const [peers, count] = await Promise.all([
+  const [peers, count, wyriweCount] = await Promise.all([
     db.getPeers(),
     db.recordCount(config.syncNamespace),
+    db.recordCount(config.syncNamespace + ':wyriwe'),
   ])
   return c.json({
     ok:            true,
@@ -110,6 +112,12 @@ app.get('/health', async (c) => {
     namespace:     config.syncNamespace,
     signerAddress,
     identity:      identity ?? null,
+    tiers: {
+      signed:  !!signerAddress,
+      erc8004: !!identity,
+      wyriwe:  wyriweCount > 0,
+      ocp:     wyriweCount > 0,
+    },
     peers:         peers.map((p) => ({
       url:           p.url,
       healthy:       p.healthy,
@@ -128,9 +136,22 @@ const signerAddress = config.gatewayKey
   ? privateKeyToAccount(config.gatewayKey).address
   : null
 
-serve({ fetch: app.fetch, port: config.port })
+const server = serve({ fetch: app.fetch, port: config.port })
 
 console.log(`[ccip-router] listening on :${config.port}`)
 console.log(`[ccip-router] namespace:  ${config.syncNamespace}`)
 console.log(`[ccip-router] signing:    ${signerAddress ?? 'dry-run'}`)
 console.log(`[ccip-router] peers:      ${config.peers.length}`)
+
+// Graceful shutdown — flush WAL and close DB before exiting
+function shutdown(signal: string) {
+  console.log(`[ccip-router] ${signal} received — shutting down`)
+  server.close(() => {
+    db.close()
+    process.exit(0)
+  })
+  // Force-exit if server doesn't close within 5 s
+  setTimeout(() => { db.close(); process.exit(1) }, 5_000).unref()
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+process.on('SIGINT',  () => shutdown('SIGINT'))

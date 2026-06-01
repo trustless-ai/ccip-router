@@ -3,6 +3,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { getConfig } from '../config.js'
 import { getDB } from '../db/index.js'
 import { syncAll } from '../mesh/sync.js'
+import { getLogs } from '../log.js'
 import { requireAdmin, setAdminSession, clearAdminSession } from './auth.js'
 
 export const adminRouter = new Hono()
@@ -42,10 +43,11 @@ adminRouter.post('/logout', (c) => {
 adminRouter.get('/api/status', async (c) => {
   const config = getConfig()
   const db     = getDB()
-  const [peers, count, recent] = await Promise.all([
+  const [peers, count, recent, wyriweCount] = await Promise.all([
     db.getPeers(),
     db.recordCount(config.syncNamespace),
     db.getRecentRecords(config.syncNamespace, 8),
+    db.recordCount(config.syncNamespace + ':wyriwe'),
   ])
   const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
@@ -53,12 +55,22 @@ adminRouter.get('/api/status', async (c) => {
     namespace: config.syncNamespace, syncInterval: config.syncInterval,
     protected: !!config.adminSecret,
     records: count,
+    tiers: {
+      signed:  !!signerAddress,
+      erc8004: !!(config.agentId && config.registryAddress),
+      wyriwe:  wyriweCount > 0,
+      ocp:     wyriweCount > 0,
+    },
     peers: peers.map((p) => ({
       url: p.url, healthy: p.healthy,
       signerAddress: p.signerAddress, nodeVersion: p.nodeVersion, lastSyncAt: p.lastSyncAt,
     })),
     recent: recent.map((r) => ({ inputHash: r.inputHash, timestamp: r.timestamp, sourcePeer: r.sourcePeer })),
   })
+})
+
+adminRouter.get('/api/logs', (c) => {
+  return c.json(getLogs())
 })
 
 adminRouter.post('/api/sync', async (c) => {
@@ -414,6 +426,46 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     .ninfo-item .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
     .ninfo-item .val { font-family: var(--mono); font-size: 12px; color: var(--text); }
 
+    /* ── Stack status ── */
+    .stack-status {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 10px 28px; border-bottom: 1px solid var(--border);
+      background: rgba(0,0,0,0.3);
+    }
+    .stack-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; margin-right: 4px; }
+    .tier-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      border-radius: 20px; padding: 3px 10px;
+      font-size: 11px; font-weight: 500;
+    }
+    .tier-pill .tp-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .tier-pill.on  { background: var(--green-l); border: 1px solid var(--green-b);  color: var(--green); }
+    .tier-pill.off { background: var(--s1);      border: 1px solid var(--border);   color: var(--muted); }
+    .tier-pill.on  .tp-dot { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,0.6); }
+    .tier-pill.off .tp-dot { background: var(--muted); }
+
+    /* ── Log panel ── */
+    .log-panel {
+      margin-top: 16px;
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden;
+    }
+    .log-panel .panel-header { padding: 12px 18px; border-bottom: 1px solid var(--border); }
+    .log-body {
+      max-height: 260px; overflow-y: auto;
+      font-family: var(--mono); font-size: 11px; line-height: 1.55;
+      padding: 10px 18px;
+    }
+    .log-body::-webkit-scrollbar { width: 4px; }
+    .log-body::-webkit-scrollbar-track { background: transparent; }
+    .log-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    .log-row { display: flex; gap: 10px; padding: 1px 0; }
+    .log-ts   { color: var(--muted); flex-shrink: 0; }
+    .log-msg  { word-break: break-all; }
+    .log-row.info  .log-msg { color: rgba(255,255,255,0.6); }
+    .log-row.warn  .log-msg { color: var(--amber); }
+    .log-row.error .log-msg { color: var(--red); }
+
     /* ── Toast ── */
     .toast {
       position: fixed; bottom: 24px; right: 24px;
@@ -445,6 +497,14 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 <div class="warn-banner" id="warn-banner">
   ⚠ Admin is open — anyone who can reach this port has full access.
   Set <code>ADMIN_SECRET</code> in your environment or <a href="/setup">reconfigure</a>.
+</div>
+
+<div class="stack-status" id="stack-status" style="display:none">
+  <span class="stack-lbl">Stack</span>
+  <span class="tier-pill off" id="tier-signed"><span class="tp-dot"></span>Signing</span>
+  <span class="tier-pill off" id="tier-erc8004"><span class="tp-dot"></span>ERC-8004</span>
+  <span class="tier-pill off" id="tier-wyriwe"><span class="tp-dot"></span>WYRIWE</span>
+  <span class="tier-pill off" id="tier-ocp"><span class="tp-dot"></span>OCP</span>
 </div>
 
 <main>
@@ -487,6 +547,14 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       <div id="records-list"><div class="empty">Loading...</div></div>
     </div>
 
+  </div>
+
+  <div class="log-panel">
+    <div class="panel-header">
+      <div class="panel-title">Node logs</div>
+      <button class="btn btn-ghost btn-sm" onclick="loadLogs()">↻ Refresh</button>
+    </div>
+    <div class="log-body" id="log-body"><div class="empty">Loading...</div></div>
   </div>
 
   <div class="node-bar" id="node-bar" style="display:none">
@@ -578,6 +646,19 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('warn-banner').style.display = d.protected ? 'none' : 'flex'
     // Show logout only if protected
     document.getElementById('btn-logout').style.display  = d.protected ? 'inline-flex' : 'none'
+
+    // Stack status pills
+    if (d.tiers) {
+      document.getElementById('stack-status').style.display = 'flex'
+      const setTier = (id, on) => {
+        const el = document.getElementById(id)
+        el.className = 'tier-pill ' + (on ? 'on' : 'off')
+      }
+      setTier('tier-signed',  d.tiers.signed)
+      setTier('tier-erc8004', d.tiers.erc8004)
+      setTier('tier-wyriwe',  d.tiers.wyriwe)
+      setTier('tier-ocp',     d.tiers.ocp)
+    }
   }
 
   async function syncNow() {
@@ -619,8 +700,29 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     setTimeout(() => el.classList.remove('show'), 2500)
   }
 
+  function fmtTs(ms) {
+    const d = new Date(ms)
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }
+
+  async function loadLogs() {
+    const res = await fetch('/admin/api/logs')
+    if (!res.ok) return
+    const logs = await res.json()
+    const el   = document.getElementById('log-body')
+    if (!logs.length) { el.innerHTML = '<div class="empty">No log entries yet.</div>'; return }
+    el.innerHTML = [...logs].reverse().map(e => \`
+      <div class="log-row \${e.level}">
+        <span class="log-ts">\${fmtTs(e.ts)}</span>
+        <span class="log-msg">\${e.msg.replace(/</g,'&lt;')}</span>
+      </div>
+    \`).join('')
+  }
+
   load()
+  loadLogs()
   setInterval(load, 15000)
+  setInterval(loadLogs, 10000)
   document.getElementById('peer-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') addPeer() })
 </script>
 </body>

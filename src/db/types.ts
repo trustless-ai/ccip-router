@@ -30,4 +30,5 @@ export interface DB {
   removePeer(url: string): Promise<void>
   getPeers(): Promise<PeerState[]>
   recordCount(namespace: string): Promise<number>
+  close(): void
 }

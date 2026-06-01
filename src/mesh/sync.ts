@@ -3,7 +3,6 @@ import type { Config } from '../config.js'
 import { recoverRecordSigner } from '../crypto/index.js'
 
 // Manual sync trigger — used by the admin dashboard "Sync now" button.
-// Mirrors what the cron does on each tick.
 export async function syncAll(config: Config, db: DB): Promise<number> {
   const peers = await db.getPeers()
   const results = await Promise.allSettled(
@@ -18,15 +17,20 @@ export async function syncAll(config: Config, db: DB): Promise<number> {
 const SUPPORTED_PROTOCOL = 1
 
 type RecordsResponse = {
-  protocol: number
+  protocol:     number
   node_version: string
-  namespace: string
-  records: MeshRecord[]
-  cursor: string | null
+  namespace:    string
+  records:      MeshRecord[]
+  cursor:       string | null
+}
+
+type HealthResponse = {
+  version:       string
+  signerAddress: string | null
 }
 
 // Pull all new records from a single peer, paginating until cursor is null.
-// Returns the discovered signer address (consistent across the batch) or null.
+// After records are synced, fetches /health to populate nodeVersion.
 export async function syncPeer(
   peer: PeerState,
   namespace: string,
@@ -39,7 +43,7 @@ export async function syncPeer(
 
   try {
     do {
-      const url = buildUrl(peer.url, namespace, peer.lastSyncAt, cursor)
+      const url  = buildRecordsUrl(peer.url, namespace, peer.lastSyncAt, cursor)
       const body = await fetchRecords(url)
 
       if (body.protocol !== SUPPORTED_PROTOCOL) {
@@ -48,7 +52,7 @@ export async function syncPeer(
       }
 
       for (const record of body.records) {
-        const result = await validateAndInsert(record, db)
+        const result = await validateAndInsert(record, db, peer.signerAddress)
         if (result.inserted) {
           inserted++
           if (result.signer && !discoveredSigner) discoveredSigner = result.signer
@@ -64,11 +68,14 @@ export async function syncPeer(
       console.log(`[sync] ${peer.url} — +${inserted} inserted, ${rejected} rejected`)
     }
 
+    // Fetch /health to get the peer's current nodeVersion (non-blocking best-effort)
+    const health = await fetchPeerHealth(peer.url)
+
     return {
       healthy:       true,
       lastSyncAt:    Math.floor(Date.now() / 1000),
-      nodeVersion:   null, // populated from /health separately
-      signerAddress: discoveredSigner ?? peer.signerAddress,
+      nodeVersion:   health?.version        ?? peer.nodeVersion,
+      signerAddress: discoveredSigner       ?? health?.signerAddress ?? peer.signerAddress,
     }
   } catch (err) {
     console.warn(`[sync] ${peer.url} unreachable — ${String(err)}`)
@@ -76,14 +83,16 @@ export async function syncPeer(
   }
 }
 
-// Validate a single record's signature, then insert if valid.
-// Dry-run records (signature === '0x') are accepted but flagged.
+// Validate a single record's signature then insert.
+// Signer pinning: if the peer's signer address is already known, reject any
+// record signed by a different key — prevents a compromised peer from injecting
+// records on behalf of another node.
 async function validateAndInsert(
   record: MeshRecord,
   db: DB,
+  knownSigner: string | null,
 ): Promise<{ inserted: boolean; signer: string | null }> {
   if (record.signature === '0x') {
-    // unsigned — accept in dev/dry-run, log warning
     console.warn(`[sync] unsigned record ${record.inputHash} — accepted (dry-run peer)`)
     await db.insertRecord(record)
     return { inserted: true, signer: null }
@@ -97,11 +106,19 @@ async function validateAndInsert(
     return { inserted: false, signer: null }
   }
 
+  if (knownSigner && signer.toLowerCase() !== knownSigner.toLowerCase()) {
+    console.warn(
+      `[sync] signer mismatch on ${record.inputHash}: ` +
+      `expected ${knownSigner.slice(0, 10)}… got ${signer.slice(0, 10)}… — rejected`,
+    )
+    return { inserted: false, signer: null }
+  }
+
   await db.insertRecord(record)
   return { inserted: true, signer }
 }
 
-function buildUrl(
+function buildRecordsUrl(
   baseUrl: string,
   namespace: string,
   since: number,
@@ -119,4 +136,16 @@ async function fetchRecords(url: string): Promise<RecordsResponse> {
   const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json() as Promise<RecordsResponse>
+}
+
+async function fetchPeerHealth(baseUrl: string): Promise<HealthResponse | null> {
+  try {
+    const res = await fetch(new URL('/health', baseUrl).toString(), {
+      signal: AbortSignal.timeout(5_000),
+    })
+    if (!res.ok) return null
+    return res.json() as Promise<HealthResponse>
+  } catch {
+    return null
+  }
 }
