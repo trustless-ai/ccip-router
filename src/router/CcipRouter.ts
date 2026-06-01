@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { Config } from '../config.js'
 import type { DB } from '../db/types.js'
 
 // The function the operator supplies — all resolver logic lives here.
@@ -12,19 +13,22 @@ export type ResolverFn = (
 
 export type CcipRouterOptions = {
   resolver: ResolverFn
-  namespace?: string   // defaults to 'default' — use 'agent-attestations' for ENS Boiler
-  db?: DB              // if omitted, records are not persisted (dry-run mode)
+  namespace?: string      // defaults to 'default' — use 'agent-attestations' for ENS Boiler
+  db?: DB                 // if omitted, records are not persisted (dry-run mode)
+  gatewayKey?: `0x${string}` | null  // from config — null = no signing
 }
 
 export class CcipRouter {
   private resolver: ResolverFn
   private namespace: string
   private db: DB | null
+  private gatewayKey: `0x${string}` | null
 
   constructor(opts: CcipRouterOptions) {
-    this.resolver = opts.resolver
-    this.namespace = opts.namespace ?? 'default'
-    this.db = opts.db ?? null
+    this.resolver   = opts.resolver
+    this.namespace  = opts.namespace ?? 'default'
+    this.db         = opts.db ?? null
+    this.gatewayKey = opts.gatewayKey ?? null
   }
 
   // Returns a Hono app — mount wherever you need it.
