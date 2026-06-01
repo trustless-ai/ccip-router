@@ -73,6 +73,80 @@ adminRouter.get('/api/logs', (c) => {
   return c.json(getLogs())
 })
 
+adminRouter.get('/api/audit', async (c) => {
+  const config = getConfig()
+  const db     = getDB()
+  const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
+  const [count, wyriweCount] = await Promise.all([
+    db.recordCount(config.syncNamespace),
+    db.recordCount(config.syncNamespace + ':wyriwe'),
+  ])
+  const erc8004On = !!(config.agentId && config.registryAddress)
+  const wyriweOn  = wyriweCount > 0
+
+  return c.json({ specs: [
+    {
+      key: 'eip3668', name: 'EIP-3668', label: 'CCIP-Read', status: 'pass',
+      description: 'Client-to-gateway transport layer. Clients call /{sender}/{data}.json; gateway returns { data: "0x..." }.',
+      details: [
+        { k: 'Endpoint',   v: '/{sender}/{data}.json' },
+        { k: 'Signing',    v: signerAddress ? 'EIP-191' : 'dry-run (unsigned)' },
+        { k: 'Signer',     v: signerAddress ?? 'not configured' },
+        { k: 'Namespace',  v: config.syncNamespace },
+        { k: 'Records',    v: String(count) },
+      ],
+    },
+    {
+      key: 'wyriwe', name: 'WYRIWE', label: 'Input Attestation',
+      status: wyriweOn ? 'pass' : 'inactive',
+      description: 'Triple-hash input provenance. EIP-712 WyriweAttestation signed and persisted on every resolver call.',
+      details: wyriweOn
+        ? [
+            { k: 'Path',       v: 'sentinel (IDENTITY_SENTINEL)' },
+            { k: 'Records',    v: String(wyriweCount) },
+            { k: 'Namespace',  v: config.syncNamespace + ':wyriwe' },
+            { k: 'Signing',    v: 'EIP-712 WyriweAttestation' },
+            { k: 'Hash chain', v: 'rawInputHash → sanitizationPipelineHash → inputHash' },
+          ]
+        : [
+            { k: 'Missing',    v: 'withWyriwe() not active — 0 attestation records', warn: true },
+            { k: 'Enable',     v: 'Wrap your resolver with withWyriwe(resolver, opts)' },
+          ],
+    },
+    {
+      key: 'erc8004', name: 'ERC-8004', label: 'Agent Identity',
+      status: erc8004On ? 'pass' : 'inactive',
+      description: 'On-chain agent identity declaration. agentId + registryAddress exposed via /identity.',
+      details: erc8004On
+        ? [
+            { k: 'Agent ID',   v: config.agentId! },
+            { k: 'Registry',   v: config.registryAddress! },
+            { k: 'Chain ID',   v: String(config.chainId) },
+            { k: 'Endpoint',   v: '/identity' },
+          ]
+        : [
+            { k: 'Missing',    v: [!config.agentId && 'AGENT_ID', !config.registryAddress && 'REGISTRY_ADDRESS'].filter(Boolean).join(', '), warn: true },
+            { k: 'Enable',     v: 'Set AGENT_ID and REGISTRY_ADDRESS in env or config.json' },
+          ],
+    },
+    {
+      key: 'ocp', name: 'OCP / ERC-8263', label: 'Observation Commitment',
+      status: wyriweOn ? 'pass' : 'inactive',
+      description: 'Verifiable commitment linking agent, model, input, and output. Produced alongside every WYRIWE attestation.',
+      details: wyriweOn
+        ? [
+            { k: 'Records',    v: String(wyriweCount) },
+            { k: 'Endpoint',   v: '/ocp/:inputHash' },
+            { k: 'Commitment', v: 'keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))' },
+          ]
+        : [
+            { k: 'Missing',    v: 'Requires WYRIWE to be active', warn: true },
+            { k: 'Enable',     v: 'Enable WYRIWE first via withWyriwe() wrapper' },
+          ],
+    },
+  ]})
+})
+
 adminRouter.post('/api/sync', async (c) => {
   const config = getConfig()
   const db     = getDB()
@@ -466,6 +540,63 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     .log-row.warn  .log-msg { color: var(--amber); }
     .log-row.error .log-msg { color: var(--red); }
 
+    /* ── Spec audit ── */
+    .audit-panel {
+      margin-top: 16px;
+      background: var(--s1); border: 1px solid var(--border);
+      border-radius: 14px; overflow: hidden;
+    }
+    .audit-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 18px; border-bottom: 1px solid transparent;
+      cursor: pointer; user-select: none; transition: background 0.15s;
+    }
+    .audit-header:hover { background: rgba(255,255,255,0.02); }
+    .audit-header.open { border-bottom-color: var(--border); }
+    .audit-chevron { font-size: 10px; color: var(--muted); transition: transform 0.2s; display: inline-block; }
+    .audit-chevron.open { transform: rotate(180deg); }
+
+    .audit-summary { display: flex; align-items: center; gap: 6px; }
+    .audit-mini-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      border-radius: 20px; padding: 2px 8px; font-size: 10px; font-weight: 500;
+    }
+    .audit-mini-pill.pass     { background: var(--green-l); color: var(--green);  border: 1px solid var(--green-b); }
+    .audit-mini-pill.inactive { background: var(--s1);      color: var(--muted);  border: 1px solid var(--border); }
+
+    .audit-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr);
+      gap: 14px; padding: 16px 18px;
+    }
+    @media (max-width: 640px) { .audit-grid { grid-template-columns: 1fr; } }
+
+    .spec-card {
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 16px;
+      transition: border-color 0.15s;
+    }
+    .spec-card.pass     { border-color: rgba(34,197,94,0.2); }
+    .spec-card.inactive { opacity: 0.8; }
+
+    .spec-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
+    .spec-name  { font-size: 13px; font-weight: 600; }
+    .spec-label { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .spec-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      border-radius: 20px; padding: 2px 9px; font-size: 10px; font-weight: 600;
+      flex-shrink: 0; margin-left: 8px;
+    }
+    .spec-badge.pass     { background: var(--green-l); color: var(--green);  border: 1px solid var(--green-b); }
+    .spec-badge.inactive { background: var(--s1);      color: var(--muted);  border: 1px solid var(--border); }
+
+    .spec-desc { font-size: 11px; color: var(--muted); margin-bottom: 12px; line-height: 1.55; }
+
+    .spec-rows { display: flex; flex-direction: column; gap: 5px; }
+    .spec-row  { display: flex; gap: 8px; font-size: 11px; }
+    .spec-row .sk { color: var(--muted); flex-shrink: 0; min-width: 72px; }
+    .spec-row .sv { font-family: var(--mono); color: rgba(255,255,255,0.75); word-break: break-all; line-height: 1.4; }
+    .spec-row.warn .sv { color: var(--amber); }
+
     /* ── Toast ── */
     .toast {
       position: fixed; bottom: 24px; right: 24px;
@@ -555,6 +686,19 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       <button class="btn btn-ghost btn-sm" onclick="loadLogs()">↻ Refresh</button>
     </div>
     <div class="log-body" id="log-body"><div class="empty">Loading...</div></div>
+  </div>
+
+  <div class="audit-panel" id="audit-panel">
+    <div class="audit-header" id="audit-header" onclick="toggleAudit()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="panel-title">Spec audit</div>
+        <div class="audit-summary" id="audit-summary"></div>
+      </div>
+      <span class="audit-chevron" id="audit-chevron">▼</span>
+    </div>
+    <div id="audit-body" style="display:none">
+      <div class="audit-grid" id="audit-grid"></div>
+    </div>
   </div>
 
   <div class="node-bar" id="node-bar" style="display:none">
@@ -719,8 +863,63 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     \`).join('')
   }
 
+  // ── Spec audit ────────────────────────────────────────────────────────────
+
+  let auditLoaded = false
+  let auditOpen   = false
+
+  async function loadAudit() {
+    const res = await fetch('/admin/api/audit')
+    if (!res.ok) return
+    const { specs } = await res.json()
+    renderAuditSummary(specs)
+    renderAuditGrid(specs)
+    auditLoaded = true
+  }
+
+  function renderAuditSummary(specs) {
+    document.getElementById('audit-summary').innerHTML = specs.map(s => \`
+      <span class="audit-mini-pill \${s.status}">\${s.name}</span>
+    \`).join('')
+  }
+
+  function renderAuditGrid(specs) {
+    document.getElementById('audit-grid').innerHTML = specs.map(s => \`
+      <div class="spec-card \${s.status}">
+        <div class="spec-top">
+          <div>
+            <div class="spec-name">\${s.name}</div>
+            <div class="spec-label">\${s.label}</div>
+          </div>
+          <span class="spec-badge \${s.status}">\${s.status === 'pass' ? '✓ Pass' : '○ Inactive'}</span>
+        </div>
+        <div class="spec-desc">\${s.description}</div>
+        <div class="spec-rows">
+          \${s.details.map(d => \`
+            <div class="spec-row \${d.warn ? 'warn' : ''}">
+              <span class="sk">\${d.k}</span>
+              <span class="sv">\${d.v}</span>
+            </div>
+          \`).join('')}
+        </div>
+      </div>
+    \`).join('')
+  }
+
+  function toggleAudit() {
+    auditOpen = !auditOpen
+    const body    = document.getElementById('audit-body')
+    const chevron = document.getElementById('audit-chevron')
+    const header  = document.getElementById('audit-header')
+    body.style.display  = auditOpen ? 'block' : 'none'
+    chevron.className   = 'audit-chevron' + (auditOpen ? ' open' : '')
+    header.className    = 'audit-header'  + (auditOpen ? ' open' : '')
+    if (auditOpen && !auditLoaded) loadAudit()
+  }
+
   load()
   loadLogs()
+  loadAudit()
   setInterval(load, 15000)
   setInterval(loadLogs, 10000)
   document.getElementById('peer-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') addPeer() })

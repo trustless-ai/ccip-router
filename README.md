@@ -319,8 +319,11 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] `withWyriwe()` non-sentinel path — `sanitizationCID` option; `inputHash = keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))`
 - [x] Setup wizard reconfigure flow — pre-fills current config, "Keep existing key", `/setup/current-config` endpoint, inherited admin secret
 
+- [x] Spec audit accordion panel in admin — per-spec cards (EIP-3668 / WYRIWE / ERC-8004 / OCP), inline summary pills, expandable detail grid with missing-config hints
+
 ### Next
-- [ ] Spec audit panel in admin — explicit per-spec compliance view (EIP-3668, WYRIWE, ERC-8004, OCP)
+- [ ] `AttestationIndex.sol` — chain as source of truth, no shared DB
+- [ ] `/verify` on-chain fallback
 
 ### Phase 2
 - [ ] `AttestationIndex.sol` — chain as source of truth, no shared DB
