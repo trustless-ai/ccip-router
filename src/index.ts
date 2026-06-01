@@ -61,24 +61,34 @@ if (config.peers.length > 0) {
 // })
 
 // ---------------------------------------------------------------------------
-// Advanced usage — wrap resolver with WYRIWE attestation (agent stack)
+// Advanced usage — ERC-8004 identity + WYRIWE attestation (agent stack)
+// Set AGENT_ID, REGISTRY_ADDRESS, MODEL_HASH, CHAIN_ID in env or config.json
 // ---------------------------------------------------------------------------
 // const ccip = new CcipRouter({
-//   namespace: config.syncNamespace,
+//   namespace:  config.syncNamespace,
 //   db,
+//   gatewayKey: config.gatewayKey,
+//   identity,   // ERC-8004 — exposes /identity, included in /health
 //   resolver: withWyriwe(myAgentResolver, {
 //     gatewayKey:      config.gatewayKey!,
-//     registryAddress: process.env.REGISTRY_ADDRESS as `0x${string}`,
-//     agentId:         process.env.AGENT_ID as `0x${string}`,
+//     registryAddress: config.registryAddress!,
+//     agentId:         config.agentId!,
 //     modelHash:       process.env.MODEL_HASH as `0x${string}`,
+//     chainId:         config.chainId,
 //   }),
 // })
+
+// Build identity opts from config — passed to CcipRouter and available via /identity
+const identity = config.agentId && config.registryAddress
+  ? { agentId: config.agentId, registryAddress: config.registryAddress, chainId: config.chainId }
+  : undefined
 
 // Default dev resolver — returns empty bytes, useful for testing mesh sync
 const ccip = new CcipRouter({
   namespace:  config.syncNamespace,
   db,
   gatewayKey: config.gatewayKey,
+  identity,
   resolver:   async (_sender, _calldata, _namespace) => '0x',
 })
 
@@ -96,7 +106,8 @@ app.get('/health', async (c) => {
     ok:            true,
     version:       '0.1.0',
     namespace:     config.syncNamespace,
-    signerAddress: signerAddress,
+    signerAddress,
+    identity:      identity ?? null,
     peers:         peers.map((p) => ({
       url:           p.url,
       healthy:       p.healthy,

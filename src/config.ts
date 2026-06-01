@@ -9,6 +9,10 @@ export type Config = {
   peers: string[]
   syncInterval: string              // cron expression
   syncNamespace: string
+  // ERC-8004 identity — optional, enables /identity endpoint and /health identity field
+  agentId:         `0x${string}` | null
+  registryAddress: `0x${string}` | null
+  chainId:         number
 }
 
 export type ConfigFile = {
@@ -19,6 +23,10 @@ export type ConfigFile = {
   dbPath?: string
   port?: number
   peers?: string[]
+  // ERC-8004 identity
+  agentId?: string
+  registryAddress?: string
+  chainId?: number
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -75,6 +83,9 @@ export function loadConfig(): Config {
     PEERS:               process.env.PEERS               ?? (file.peers ?? []).join(','),
     SYNC_INTERVAL:       process.env.SYNC_INTERVAL       ?? file.syncInterval,
     SYNC_NAMESPACE:      process.env.SYNC_NAMESPACE       ?? file.namespace,
+    AGENT_ID:            process.env.AGENT_ID            ?? file.agentId,
+    REGISTRY_ADDRESS:    process.env.REGISTRY_ADDRESS    ?? file.registryAddress,
+    CHAIN_ID:            process.env.CHAIN_ID            ?? String(file.chainId ?? ''),
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -92,14 +103,31 @@ export function loadConfig(): Config {
     console.warn('[config] ADMIN_SECRET not set — admin dashboard is open (dev mode)')
   }
 
+  const agentId = raw.AGENT_ID?.trim()
+    ? requireHex('AGENT_ID', raw.AGENT_ID.trim())
+    : null
+
+  const registryAddress = raw.REGISTRY_ADDRESS?.trim()
+    ? requireHex('REGISTRY_ADDRESS', raw.REGISTRY_ADDRESS.trim())
+    : null
+
+  const chainId = raw.CHAIN_ID ? Number(raw.CHAIN_ID) : 1
+
+  if (agentId) {
+    console.log(`[config] identity:  agentId=${agentId.slice(0, 10)}... registry=${registryAddress ?? 'unset'} chainId=${chainId}`)
+  }
+
   return {
-    port:          parsePort(raw.PORT),
-    dbPath:        raw.DB_PATH ?? './data.db',
+    port:            parsePort(raw.PORT),
+    dbPath:          raw.DB_PATH ?? './data.db',
     gatewayKey,
     adminSecret,
     peers,
-    syncInterval:  raw.SYNC_INTERVAL ?? '*/5 * * * *',
-    syncNamespace: raw.SYNC_NAMESPACE ?? 'agent-attestations',
+    syncInterval:    raw.SYNC_INTERVAL ?? '*/5 * * * *',
+    syncNamespace:   raw.SYNC_NAMESPACE ?? 'agent-attestations',
+    agentId,
+    registryAddress,
+    chainId,
   }
 }
 

@@ -94,6 +94,9 @@ npm run dev
 | `SYNC_NAMESPACE` | No | `agent-attestations` | Record namespace — peers must match |
 | `SYNC_INTERVAL` | No | `*/5 * * * *` | Cron expression for peer sync |
 | `PEERS` | No | — | Comma-separated peer URLs |
+| `AGENT_ID` | No | — | ERC-8004 agent identity (bytes32 hex). Enables `/identity` endpoint. |
+| `REGISTRY_ADDRESS` | No | — | ERC-8004 on-chain registry address. Required alongside `AGENT_ID`. |
+| `CHAIN_ID` | No | `1` | Chain where the ERC-8004 registry is deployed. |
 
 \* Can also come from `config.json` written by the setup wizard.
 
@@ -209,10 +212,17 @@ GET /verify/:inputHash
 → { inputHash, found: false }   (404)
 ```
 
+### Identity (ERC-8004)
+```
+GET /identity
+→ { declared: true, agentId, registryAddress, chainId, namespace, signerAddress }
+→ { declared: false }   (404 — AGENT_ID not configured)
+```
+
 ### Health
 ```
 GET /health
-→ { ok, version, namespace, signerAddress, peers, records }
+→ { ok, version, namespace, signerAddress, identity: { agentId, registryAddress, chainId } | null, peers, records }
 ```
 
 ### Admin API (requires auth if ADMIN_SECRET set)
@@ -252,7 +262,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 |---|---|---|---|
 | EIP-3668 | Transport | CCIP-Read client-to-gateway | ✅ implemented |
 | WYRIWE | L2 Input trust | Triple-hash commitment, EIP-712 attestation | ✅ implemented |
-| ERC-8004 | L1 Identity | Agent identity `agentId` + `registryAddress` in attestation | 🔜 identity block in options |
+| ERC-8004 | L1 Identity | Agent identity `agentId` + `registryAddress` in attestation | ✅ implemented |
 | OCP / ERC-8263 | L3 Observation | Observation commitment hash | 🔜 next |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
 
@@ -271,10 +281,10 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Admin auth — cookie session + Bearer token (`ADMIN_SECRET`)
 - [x] `withWyriwe()` — EIP-712 attestation, triple-hash chain, IDENTITY_SENTINEL path
 - [x] `/verify` — clean proof per namespace: `{ verified, signer, signingType, signature, attestation }`
+- [x] ERC-8004 identity — `AGENT_ID` + `REGISTRY_ADDRESS` + `CHAIN_ID`, `/identity` endpoint, `/health` field
 - [x] Router SVG favicon, dinamic.eth design language
 
 ### Next
-- [ ] ERC-8004 identity block in `CcipRouterOptions` (`agentId`, `registryAddress`)
 - [ ] OCP / ERC-8263 observation commitment hash in attestation
 - [ ] Peer signer pinning — reject records with unexpected signer after first sync
 - [ ] Peer health polling (dedicated `/health` fetch loop, separate from sync)
