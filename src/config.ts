@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 export type Config = {
@@ -22,6 +22,8 @@ export type Config = {
   nodeUrl:          string | null          // this node's public URL (for VNI + NodeRegistry)
   nodeRegistry:     `0x${string}` | null  // deployed NodeRegistry contract
   autoDiscover:     boolean               // pull peer lists from synced peers (default: true)
+  // Admin auth — claimed via SIWE on first login, decoupled from gatewayKey
+  adminAddress:     string | null
 }
 
 export type ConfigFile = {
@@ -44,6 +46,7 @@ export type ConfigFile = {
   nodeUrl?: string
   nodeRegistry?: string
   autoDiscover?: boolean
+  adminAddress?: string
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -164,6 +167,8 @@ export function loadConfig(): Config {
     console.log(`[config] node url:  ${nodeUrl}${nodeRegistry ? ` registry=${nodeRegistry}` : ''}`)
   }
 
+  const adminAddress = file.adminAddress?.trim() || null
+
   return {
     port:             parsePort(raw.PORT),
     dbPath:           raw.DB_PATH ?? './data.db',
@@ -181,6 +186,7 @@ export function loadConfig(): Config {
     nodeUrl,
     nodeRegistry,
     autoDiscover,
+    adminAddress,
   }
 }
 
@@ -190,4 +196,15 @@ let _config: Config | null = null
 export function getConfig(): Config {
   if (!_config) _config = loadConfig()
   return _config
+}
+
+// Persist adminAddress to config.json and update the in-memory singleton without restart.
+export function setAdminAddress(address: string): void {
+  if (_config) _config.adminAddress = address
+  let existing: ConfigFile = {}
+  if (existsSync(CONFIG_FILE_PATH)) {
+    try { existing = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile } catch {}
+  }
+  writeFileSync(CONFIG_FILE_PATH, JSON.stringify({ ...existing, adminAddress: address }, null, 2), 'utf8')
+  console.log(`[config] adminAddress set to ${address}`)
 }

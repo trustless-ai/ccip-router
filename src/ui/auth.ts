@@ -10,15 +10,17 @@ export function getSessionAddress(c: Parameters<MiddlewareHandler>[0]): `0x${str
 }
 
 // Applies to all /admin/* routes.
-// authorizedAddress: the gateway signer address — only this wallet can log in via SIWE
+// authorizedAddress: set admin wallet — only this address can log in via SIWE
 // adminSecret:       optional Bearer-token fallback for CLI / scripts
-// If both are null → open access (dev mode, warning shown in UI)
+// claimMode:         true when adminAddress is unset but a gatewayKey exists → require login (claim flow)
+// If authorizedAddress, adminSecret, and claimMode are all falsy → open access (dev mode)
 export function requireAdmin(
   authorizedAddress: string | null,
   adminSecret:       string | null,
+  claimMode:         boolean = false,
 ): MiddlewareHandler {
   return async (c, next) => {
-    if (!authorizedAddress && !adminSecret) return next()
+    if (!authorizedAddress && !adminSecret && !claimMode) return next()
 
     const path = c.req.path
     // Auth endpoints are always public — they ARE the auth mechanism

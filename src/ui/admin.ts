@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { privateKeyToAccount } from 'viem/accounts'
-import { getConfig, CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
+import { getConfig, setAdminAddress, CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
 import { getDB } from '../db/index.js'
 import { syncAll } from '../mesh/sync.js'
 import { getLogs } from '../log.js'
@@ -13,52 +13,102 @@ import { registerNode } from '../chain/register.js'
 export const adminRouter = new Hono()
 
 // Auth middleware — applies to every /admin/* route.
-// Authorized signer = the node's gateway key holder (SIWE).
+// Admin wallet = adminAddress in config (claimed on first SIWE login, decoupled from gatewayKey).
+// claimMode = unclaimed but gatewayKey is set → force login so the first wallet can claim.
 // Bearer ADMIN_SECRET is a fallback for CLI / scripts.
 adminRouter.use('*', async (c, next) => {
   const config = getConfig()
-  const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
-  return requireAdmin(signerAddress, config.adminSecret)(c, next)
+  const claimMode = !config.adminAddress && !!config.gatewayKey
+  return requireAdmin(config.adminAddress, config.adminSecret, claimMode)(c, next)
 })
 
 // ── Auth routes ───────────────────────────────────────────────────────────────
 
 adminRouter.get('/login', (c) => {
   const config = getConfig()
-  // If no gateway key, admin is open (dev mode)
-  if (!config.gatewayKey && !config.adminSecret) return c.redirect('/admin')
+  // Dev mode: no auth configured → open access
+  if (!config.adminAddress && !config.gatewayKey && !config.adminSecret) return c.redirect('/admin')
   return c.html(LOGIN_HTML)
 })
 
-// SIWE: GET /admin/siwe/nonce — return a fresh nonce + the authorized signer address
+// SIWE: GET /admin/siwe/nonce — return a fresh nonce + claim/auth state
 adminRouter.get('/siwe/nonce', (c) => {
   const config = getConfig()
-  if (!config.gatewayKey) return c.json({ error: 'no gateway key — SIWE unavailable' }, 400)
-  const signerAddress = privateKeyToAccount(config.gatewayKey).address
-  const nonce = generateNonce()
+  if (!config.gatewayKey && !config.adminAddress) {
+    return c.json({ error: 'SIWE unavailable — configure GATEWAY_PRIVATE_KEY first' }, 400)
+  }
+  const nonce  = generateNonce()
   const domain = c.req.header('host') || 'localhost'
-  return c.json({ nonce, domain, chainId: config.chainId, authorizedAddress: signerAddress })
+  return c.json({
+    nonce, domain, chainId: config.chainId,
+    authorizedAddress: config.adminAddress ?? null,
+    claimed: !!config.adminAddress,
+  })
 })
 
-// SIWE: POST /admin/siwe/verify — verify signature, issue session cookie
+// SIWE: POST /admin/siwe/verify — verify signature, issue session cookie.
+// Claim mode (no adminAddress set): first caller's address becomes the permanent admin.
+// Normal mode: must match stored adminAddress.
 adminRouter.post('/siwe/verify', async (c) => {
   const config = getConfig()
-  if (!config.gatewayKey) return c.json({ error: 'no gateway key' }, 400)
-  const signerAddress = privateKeyToAccount(config.gatewayKey).address
+  if (!config.gatewayKey && !config.adminAddress) return c.json({ error: 'SIWE unavailable' }, 400)
 
   const { message, signature } = await c.req.json<{ message: string; signature: string }>()
   if (!message || !signature) return c.json({ error: 'message and signature required' }, 400)
 
-  const valid = await verifySiwe(message, signature as `0x${string}`, signerAddress)
+  // Extract the signer address from the SIWE message (line 2 = address)
+  const lines   = message.split('\n')
+  const address = lines[1]?.trim() as `0x${string}`
+  if (!address?.startsWith('0x')) return c.json({ error: 'cannot parse address from SIWE message' }, 400)
+
+  const valid = await verifySiwe(message, signature as `0x${string}`, address)
   if (!valid) return c.json({ error: 'invalid signature or expired nonce' }, 401)
 
-  setAdminSession(c, signerAddress)
-  return c.json({ ok: true, address: signerAddress })
+  if (!config.adminAddress) {
+    // Claim mode: first wallet to sign becomes admin
+    setAdminAddress(address)
+    setAdminSession(c, address)
+    console.log(`[admin] admin claimed by ${address}`)
+    return c.json({ ok: true, address, claimed: true })
+  }
+
+  if (address.toLowerCase() !== config.adminAddress.toLowerCase()) {
+    return c.json({ error: 'wrong wallet — expected ' + config.adminAddress }, 401)
+  }
+
+  setAdminSession(c, address)
+  return c.json({ ok: true, address, claimed: false })
 })
 
 adminRouter.post('/logout', (c) => {
   clearAdminSession(c)
   return c.redirect('/admin/login')
+})
+
+// Transfer admin: current session holder proves new wallet ownership via SIWE, then admin moves.
+adminRouter.post('/siwe/transfer', async (c) => {
+  const config = getConfig()
+  if (!config.adminAddress) return c.json({ error: 'no admin address set' }, 400)
+
+  const { message, signature } = await c.req.json<{ message: string; signature: string }>()
+  if (!message || !signature) return c.json({ error: 'message and signature required' }, 400)
+
+  const lines      = message.split('\n')
+  const newAddress = lines[1]?.trim() as `0x${string}`
+  if (!newAddress?.startsWith('0x')) return c.json({ error: 'cannot parse address from SIWE message' }, 400)
+  if (newAddress.toLowerCase() === config.adminAddress.toLowerCase()) {
+    return c.json({ error: 'new address is the same as current admin' }, 400)
+  }
+
+  const valid = await verifySiwe(message, signature as `0x${string}`, newAddress)
+  if (!valid) return c.json({ error: 'invalid signature or expired nonce' }, 401)
+
+  setAdminAddress(newAddress)
+  // Issue new session for the new admin wallet
+  clearAdminSession(c)
+  setAdminSession(c, newAddress)
+  console.log(`[admin] admin transferred from ${config.adminAddress} to ${newAddress}`)
+  return c.json({ ok: true, address: newAddress })
 })
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -75,8 +125,10 @@ adminRouter.get('/api/status', async (c) => {
   const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
     version: '0.2.0', signerAddress,
+    adminAddress: config.adminAddress ?? null,
+    adminClaimed: !!config.adminAddress,
     namespace: config.syncNamespace, syncInterval: config.syncInterval,
-    protected: !!config.adminSecret,
+    protected: !!(config.adminSecret || config.adminAddress),
     records: count,
     tiers: {
       signed:   !!signerAddress,
@@ -308,6 +360,8 @@ adminRouter.get('/api/config', (c) => {
     attestationIndex: config.attestationIndex ?? '',
     nodeRegistry:     config.nodeRegistry     ?? '',
     hasAdminSecret:   !!config.adminSecret,
+    adminAddress:     config.adminAddress  ?? '',
+    adminClaimed:     !!config.adminAddress,
   })
 })
 
@@ -556,6 +610,13 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- claim mode: shown when no adminAddress is set -->
+  <div id="claim-box" style="display:none;background:var(--amber-l);border:1px solid var(--amber-b);border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:var(--amber);line-height:1.55">
+    <strong style="display:block;font-size:13px;margin-bottom:4px">⚡ Unclaimed node</strong>
+    First wallet to sign becomes the permanent admin.
+    Connect any wallet below to claim.
+  </div>
+
   <div class="authorized-addr" id="auth-addr" style="display:none">
     <span class="dot"></span>
     <span id="auth-addr-text">loading...</span>
@@ -575,6 +636,7 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
 
 <script>
   let authorizedAddress = null
+  let isClaimed = false
 
   async function init() {
     try {
@@ -582,23 +644,25 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
       if (!res.ok) return
       const data = await res.json()
       authorizedAddress = data.authorizedAddress
-      const el = document.getElementById('auth-addr')
-      const txt = document.getElementById('auth-addr-text')
-      el.style.display = 'flex'
-      txt.textContent = 'Authorized: ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4)
-      // Store nonce for use in login — pre-fetched
-      window._nonce = data.nonce
-      window._domain = data.domain
-      window._chainId = data.chainId
+      isClaimed = data.claimed
+
+      if (!isClaimed) {
+        document.getElementById('claim-box').style.display = 'block'
+        document.getElementById('btn').innerHTML = ethIconHTML() + ' Claim admin'
+      } else {
+        const el  = document.getElementById('auth-addr')
+        const txt = document.getElementById('auth-addr-text')
+        el.style.display = 'flex'
+        txt.textContent = 'Authorized: ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4)
+        document.getElementById('btn').innerHTML = ethIconHTML() + ' Connect wallet'
+      }
     } catch {}
   }
 
   async function siweLogin() {
-    const btn = document.getElementById('btn')
+    const btn   = document.getElementById('btn')
     const errEl = document.getElementById('err')
-    const infoEl = document.getElementById('info')
     errEl.style.display = 'none'
-    infoEl.style.display = 'none'
 
     if (!window.ethereum) {
       showError('No Ethereum wallet detected. Install MetaMask or use a Bearer token via CLI.')
@@ -609,32 +673,30 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
       btn.disabled = true
       btn.textContent = 'Connecting...'
 
-      // 1. Request accounts
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
-      const address = accounts[0]
+      const address  = accounts[0]
 
-      if (authorizedAddress && address.toLowerCase() !== authorizedAddress.toLowerCase()) {
-        showError('Wrong wallet. Expected ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4) + ' (your gateway signing key).')
-        btn.disabled = false; btn.innerHTML = connectBtnHTML()
+      // Normal mode: enforce address match
+      if (isClaimed && authorizedAddress && address.toLowerCase() !== authorizedAddress.toLowerCase()) {
+        showError('Wrong wallet. Expected ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4))
+        btn.disabled = false; btn.innerHTML = ethIconHTML() + (isClaimed ? ' Connect wallet' : ' Claim admin')
         return
       }
 
       btn.textContent = 'Fetching nonce...'
 
-      // 2. Get fresh nonce
       const nonceRes = await fetch('/admin/siwe/nonce')
       const { nonce, domain, chainId } = await nonceRes.json()
 
-      btn.textContent = 'Sign in wallet...'
+      btn.textContent = isClaimed ? 'Sign in wallet...' : 'Sign to claim...'
 
-      // 3. Build SIWE message
       const now = new Date()
       const exp = new Date(now.getTime() + 10 * 60 * 1000)
       const message = [
         domain + ' wants you to sign in with your Ethereum account:',
         address,
         '',
-        'Sign in to ccip-router admin dashboard',
+        isClaimed ? 'Sign in to ccip-router admin dashboard' : 'Claim admin access for ccip-router',
         '',
         'URI: ' + window.location.origin,
         'Version: 1',
@@ -644,7 +706,6 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
         'Expiration Time: ' + exp.toISOString(),
       ].join('\\n')
 
-      // 4. Sign with personal_sign
       const signature = await window.ethereum.request({
         method: 'personal_sign',
         params: [message, address],
@@ -652,7 +713,6 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
 
       btn.textContent = 'Verifying...'
 
-      // 5. Verify on server
       const verifyRes = await fetch('/admin/siwe/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -664,7 +724,7 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
       } else {
         const { error } = await verifyRes.json()
         showError(error || 'Signature verification failed')
-        btn.disabled = false; btn.innerHTML = connectBtnHTML()
+        btn.disabled = false; btn.innerHTML = ethIconHTML() + (isClaimed ? ' Connect wallet' : ' Claim admin')
       }
     } catch (err) {
       if (err.code === 4001) {
@@ -672,7 +732,7 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
       } else {
         showError(String(err.message || err))
       }
-      btn.disabled = false; btn.innerHTML = connectBtnHTML()
+      btn.disabled = false; btn.innerHTML = ethIconHTML() + (isClaimed ? ' Connect wallet' : ' Claim admin')
     }
   }
 
@@ -682,8 +742,8 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
     el.style.display = 'block'
   }
 
-  function connectBtnHTML() {
-    return '<svg width="18" height="18" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="16" fill="#627EEA"/><path d="M16.498 4v8.87l7.497 3.35L16.498 4z" fill="#fff" fill-opacity=".6"/><path d="M16.498 4L9 16.22l7.498-3.35V4z" fill="#fff"/><path d="M16.498 21.968v6.027L24 17.616l-7.502 4.352z" fill="#fff" fill-opacity=".6"/><path d="M16.498 27.995v-6.028L9 17.616l7.498 10.379z" fill="#fff"/><path d="M16.498 20.573l7.497-4.352-7.497-3.348v7.7z" fill="#fff" fill-opacity=".2"/><path d="M9 16.22l7.498 4.353v-7.7L9 16.22z" fill="#fff" fill-opacity=".6"/></svg> Connect wallet'
+  function ethIconHTML() {
+    return '<svg width="18" height="18" viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="16" fill="#627EEA"/><path d="M16.498 4v8.87l7.497 3.35L16.498 4z" fill="#fff" fill-opacity=".6"/><path d="M16.498 4L9 16.22l7.498-3.35V4z" fill="#fff"/><path d="M16.498 21.968v6.027L24 17.616l-7.502 4.352z" fill="#fff" fill-opacity=".6"/><path d="M16.498 27.995v-6.028L9 17.616l7.498 10.379z" fill="#fff"/><path d="M16.498 20.573l7.497-4.352-7.497-3.348v7.7z" fill="#fff" fill-opacity=".2"/><path d="M9 16.22l7.498 4.353v-7.7L9 16.22z" fill="#fff" fill-opacity=".6"/></svg>'
   }
 
   init()
@@ -781,6 +841,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     .btn-danger:hover { background: rgba(239,68,68,0.25); }
     .btn-sm { padding: 5px 10px; font-size: 11px; border-radius: 7px; }
     .btn-icon { padding: 5px 8px; }
+
+    .msg { padding: 10px 14px; border-radius: 9px; font-size: 12px; }
+    .msg.error { background: var(--red-l); border: 1px solid rgba(239,68,68,0.2); color: var(--red); }
+    .msg.info  { background: var(--accent-l); border: 1px solid var(--accent-b); color: var(--indigo); }
 
     /* ── Warning banner ── */
     .warn-banner {
@@ -1357,6 +1421,53 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="audit-panel" id="admin-wallet-panel" style="margin-top:16px">
+    <div class="audit-header" id="admin-wallet-header" onclick="toggleAdminWalletPanel()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="panel-title">Admin wallet</div>
+        <span class="tier-pill off" id="admin-wallet-pill" style="font-size:10px;padding:2px 10px">
+          <span class="tp-dot"></span><span id="admin-wallet-pill-text">unclaimed</span>
+        </span>
+      </div>
+      <span class="audit-chevron" id="admin-wallet-chevron">▼</span>
+    </div>
+    <div id="admin-wallet-body" style="display:none">
+      <div class="config-form">
+
+        <div class="config-section">
+          <div class="config-section-title">Current admin wallet</div>
+          <div class="cfg-field">
+            <div class="cfg-readonly" id="admin-wallet-addr-wrap">
+              <span id="admin-wallet-addr" style="color:var(--text)">—</span>
+            </div>
+          </div>
+          <div class="cfg-hint" id="admin-wallet-hint">
+            No admin wallet claimed yet. Sign in with any wallet from the login page to claim admin access.
+          </div>
+        </div>
+
+        <div class="config-section" id="transfer-section" style="display:none">
+          <div class="config-section-title">Transfer admin to another wallet</div>
+          <div class="key-warn-box">
+            <strong>⚠ This is permanent</strong>
+            Your current session will become invalid. The new wallet will be the only way to sign in.
+            Make sure you have access to the new wallet before confirming.
+          </div>
+          <p style="font-size:12px;color:var(--subtle);margin:0 0 14px;line-height:1.5">
+            Switch to the new wallet in MetaMask, then click Transfer.
+            The new wallet must sign a message to prove ownership.
+          </p>
+          <div class="btn-row">
+            <button class="btn btn-danger" id="btn-transfer" onclick="startTransfer()">Transfer admin →</button>
+          </div>
+          <div class="msg error" id="transfer-err" style="margin-top:10px;display:none"></div>
+          <div class="msg info"  id="transfer-info" style="margin-top:10px;display:none"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <div class="audit-panel" id="ens-panel" style="margin-top:16px">
     <div class="audit-header" id="ens-header" onclick="toggleEnsPanel()">
       <div class="panel-title">ENS records</div>
@@ -1573,6 +1684,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     const res = await fetch('/admin/api/status')
     if (res.status === 401) { window.location.href = '/admin/login'; return }
     const d = await res.json()
+    window._statusData = d
 
     _signerAddress = d.signerAddress
     document.getElementById('h-addr').textContent = d.signerAddress ? trunc(d.signerAddress, 20) : 'dry-run'
@@ -1613,6 +1725,9 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('warn-banner').style.display = d.protected ? 'none' : 'flex'
     // Show logout only if protected
     document.getElementById('btn-logout').style.display  = d.protected ? 'inline-flex' : 'none'
+
+    // Admin wallet panel pill (if open)
+    if (adminWalletOpen) refreshAdminWallet()
 
     // Stack status pills
     if (d.tiers) {
@@ -1947,6 +2062,115 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     btn.textContent = 'Restarting...'
     toast('Config saved — restarting node')
     setTimeout(() => { window.location.href = '/admin' }, 4500)
+  }
+
+  // ── Admin wallet panel ─────────────────────────────────────────────────────
+
+  let adminWalletOpen = false
+  function toggleAdminWalletPanel() {
+    adminWalletOpen = !adminWalletOpen
+    document.getElementById('admin-wallet-body').style.display    = adminWalletOpen ? 'block' : 'none'
+    document.getElementById('admin-wallet-chevron').textContent   = adminWalletOpen ? '▲' : '▼'
+    if (adminWalletOpen) refreshAdminWallet()
+  }
+
+  function refreshAdminWallet() {
+    const status = window._statusData
+    if (!status) return
+    const pill     = document.getElementById('admin-wallet-pill')
+    const pillText = document.getElementById('admin-wallet-pill-text')
+    const addrEl   = document.getElementById('admin-wallet-addr')
+    const hintEl   = document.getElementById('admin-wallet-hint')
+    const transferSection = document.getElementById('transfer-section')
+
+    if (status.adminClaimed && status.adminAddress) {
+      pill.classList.remove('off'); pill.classList.add('on')
+      pillText.textContent = 'claimed'
+      addrEl.textContent   = status.adminAddress
+      hintEl.style.display = 'none'
+      transferSection.style.display = 'block'
+    } else {
+      pill.classList.add('off')
+      pillText.textContent = 'unclaimed'
+      addrEl.textContent   = '—'
+      hintEl.style.display = 'block'
+      transferSection.style.display = 'none'
+    }
+  }
+
+  async function startTransfer() {
+    const btn      = document.getElementById('btn-transfer')
+    const errEl    = document.getElementById('transfer-err')
+    const infoEl   = document.getElementById('transfer-info')
+    errEl.style.display = 'none'
+    infoEl.style.display = 'none'
+
+    if (!window.ethereum) {
+      errEl.textContent = 'No wallet detected.'; errEl.style.display = 'block'; return
+    }
+
+    try {
+      btn.disabled = true; btn.textContent = 'Connecting new wallet...'
+
+      const accounts   = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      const newAddress = accounts[0]
+      const current    = window._statusData?.adminAddress
+
+      if (current && newAddress.toLowerCase() === current.toLowerCase()) {
+        errEl.textContent = 'New wallet is the same as current admin.'; errEl.style.display = 'block'
+        btn.disabled = false; btn.textContent = 'Transfer admin →'; return
+      }
+
+      btn.textContent = 'Fetching nonce...'
+      const nonceRes = await fetch('/admin/siwe/nonce')
+      const { nonce, domain, chainId } = await nonceRes.json()
+
+      btn.textContent = 'Sign with new wallet...'
+      const now = new Date()
+      const exp = new Date(now.getTime() + 10 * 60 * 1000)
+      const message = [
+        domain + ' wants you to sign in with your Ethereum account:',
+        newAddress,
+        '',
+        'Transfer ccip-router admin to this wallet',
+        '',
+        'URI: ' + window.location.origin,
+        'Version: 1',
+        'Chain ID: ' + chainId,
+        'Nonce: ' + nonce,
+        'Issued At: ' + now.toISOString(),
+        'Expiration Time: ' + exp.toISOString(),
+      ].join('\\n')
+
+      const signature = await window.ethereum.request({
+        method: 'personal_sign',
+        params: [message, newAddress],
+      })
+
+      btn.textContent = 'Transferring...'
+      const res = await fetch('/admin/siwe/transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, signature }),
+      })
+
+      if (res.ok) {
+        infoEl.textContent = 'Admin transferred to ' + newAddress.slice(0,6) + '...' + newAddress.slice(-4) + '. Redirecting...'
+        infoEl.style.display = 'block'
+        setTimeout(() => { window.location.href = '/admin/login' }, 2000)
+      } else {
+        const { error } = await res.json()
+        errEl.textContent = error || 'Transfer failed'; errEl.style.display = 'block'
+        btn.disabled = false; btn.textContent = 'Transfer admin →'
+      }
+    } catch (err) {
+      if (err.code === 4001) {
+        errEl.textContent = 'Signature rejected.'; errEl.style.display = 'block'
+      } else {
+        errEl.textContent = String(err.message || err); errEl.style.display = 'block'
+      }
+      btn.disabled = false; btn.textContent = 'Transfer admin →'
+    }
   }
 
   // ── ENS records panel ─────────────────────────────────────────────────────
