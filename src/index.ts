@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { serve } from '@hono/node-server'
 import { privateKeyToAccount } from 'viem/accounts'
 import { getConfig } from './config.js'
 import { getDB } from './db/index.js'
@@ -93,9 +94,9 @@ const signerAddress = config.gatewayKey
   ? privateKeyToAccount(config.gatewayKey).address
   : null
 
+serve({ fetch: app.fetch, port: config.port })
+
 console.log(`[ccip-router] listening on :${config.port}`)
 console.log(`[ccip-router] namespace:  ${config.syncNamespace}`)
 console.log(`[ccip-router] signing:    ${signerAddress ?? 'dry-run'}`)
 console.log(`[ccip-router] peers:      ${config.peers.length}`)
-
-export default { port: config.port, fetch: app.fetch }
