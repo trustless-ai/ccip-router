@@ -1,6 +1,6 @@
 {
   "name": "ccip-router",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "The coordination layer CCIP-Read was missing. Peer sync, deduplication, and cryptographic attestation for any CCIP-Read gateway.",
   "type": "module",
   "main": "./dist/lib.js",
@@ -27,7 +27,8 @@
     "contracts/IAttestationVerifier.sol",
     "contracts/AttestationIndex.sol",
     "contracts/NodeRegistry.sol",
-    "contracts/WyriweAttestationVerifier.sol"
+    "contracts/WyriweAttestationVerifier.sol",
+    "contracts/OffchainResolver.sol"
   ],
   "keywords": [
     "ccip-read",
