@@ -1661,12 +1661,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
         <div class="config-section">
           <div class="config-section-title">Upload file</div>
-          <div class="cfg-row-2">
-            <div class="cfg-field">
-              <label class="cfg-label">File</label>
-              <input class="cfg-input" type="file" id="ipfs-file"/>
-            </div>
-            <div class="cfg-field" style="display:flex;align-items:flex-end">
+          <div class="cfg-field">
+            <label class="cfg-label">File</label>
+            <div style="display:flex;gap:8px;align-items:stretch">
+              <input class="cfg-input" type="file" id="ipfs-file" style="flex:1"/>
               <button class="cfg-save-btn" onclick="uploadToIpfs()" id="ipfs-upload-btn">Upload</button>
             </div>
           </div>
@@ -1686,15 +1684,13 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
               <input class="cfg-input" type="text" id="ipfs-cid" placeholder="Qm... or bafy..."/>
             </div>
           </div>
-          <div class="cfg-row-2" style="margin-top:8px">
-            <div class="cfg-field">
-              <label class="cfg-label">Network</label>
-              <select class="cfg-input" id="ipfs-chain">
+          <div class="cfg-field" style="margin-top:8px">
+            <label class="cfg-label">Network</label>
+            <div style="display:flex;gap:8px;align-items:stretch">
+              <select class="cfg-input" id="ipfs-chain" style="flex:1">
                 <option value="1">Ethereum Mainnet</option>
                 <option value="11155111">Sepolia</option>
               </select>
-            </div>
-            <div class="cfg-field" style="display:flex;align-items:flex-end">
               <button class="cfg-save-btn" onclick="setContenthash()" id="ipfs-set-btn">Set via MetaMask</button>
             </div>
           </div>
