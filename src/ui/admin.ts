@@ -2228,7 +2228,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('cfg-dbpath').value       = d.dbPath          ?? ''
     document.getElementById('cfg-signer').textContent = d.signerAddress   ?? 'dry-run'
     document.getElementById('cfg-nodeurl').value      = d.nodeUrl         ?? ''
-    document.getElementById('cfg-peers').value        = (d.peers ?? []).join('\n')
+    document.getElementById('cfg-peers').value        = (d.peers ?? []).join('\\n')
     document.getElementById('cfg-agentid').value      = d.agentId         ?? ''
     document.getElementById('cfg-registry').value     = d.registryAddress ?? ''
     document.getElementById('cfg-modelhash').value    = d.modelHash       ?? ''
@@ -2261,7 +2261,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     const btn    = document.getElementById('btn-cfg-save')
     btn.disabled = true; btn.textContent = 'Saving...'
     const peers  = document.getElementById('cfg-peers').value
-      .split('\n').map(s => s.trim()).filter(Boolean)
+      .split('\\n').map(s => s.trim()).filter(Boolean)
     const payload = {
       namespace:        document.getElementById('cfg-namespace').value.trim(),
       syncInterval:     document.getElementById('cfg-interval').value.trim(),
