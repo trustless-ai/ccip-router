@@ -240,6 +240,23 @@ What `withWyriwe()` adds on top of basic:
 
 ---
 
+## Node modes
+
+ccip-router runs in two modes — any combination can form a mesh.
+
+| Mode | Description | Typical host |
+|---|---|---|
+| **Operator node** | Admin dashboard, signing key, ENS records, attestation pipeline | Self-hosted (Docker / Coolify / VPS) |
+| **Public node** | Mesh sync + CCIP-Read serving only. No admin surface, no key UI. Set `DISABLE_ADMIN=true` | Any PaaS (Railway, Fly, Render) |
+
+Both modes use the same Docker image and npm package. The difference is configuration only.
+
+**→ [Full deployment guide](DEPLOYMENT.md)** — Docker / Coolify operator setup, Railway one-click public node, peering, Cloudflare Tunnel, multi-URL resolver, key generation, security notes.
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/ccip-router)
+
+---
+
 ## Quick start (setup wizard)
 
 ```bash
@@ -282,6 +299,12 @@ npm run dev
 | `NODE_REGISTRY` | No | — | Deployed `NodeRegistry` contract address. Enables on-chain node registration. |
 | `RPC_URL` | No | — | JSON-RPC endpoint. Required alongside `ATTESTATION_INDEX`. |
 | `MODEL_HASH` | No | — | `keccak256` of model weights CID. Required to activate WYRIWE attestation. |
+| `NODE_URL` | No | — | This node's public URL. Required for VNI (signed node identity). |
+| `AUTO_DISCOVER` | No | `true` | Pull peer lists from synced peers automatically. |
+| `CDN_PROVIDER` | No | — | `pinata` or `storacha`. Enables IPFS upload from admin panel. |
+| `CDN_API_KEY` | No | — | API key / JWT for the configured CDN provider. |
+| `NETWORK_KEY` | No | — | Ethereum address. Messages signed by this key are marked as official network announcements. |
+| `DISABLE_ADMIN` | No | `false` | Set `true` to skip mounting `/admin` and `/static` entirely. Recommended for public PaaS nodes. |
 
 \* Can also come from `config.json` written by the setup wizard.
 
