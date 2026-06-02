@@ -283,6 +283,8 @@ npm run dev
 
 ## Environment variables
 
+> **Security:** never put `GATEWAY_PRIVATE_KEY` or other secrets inline in a compose file. Use `env_file:` pointing to a `chmod 600` file, or your platform's secrets UI (Railway Variables, Fly secrets, etc.). See [DEPLOYMENT.md](DEPLOYMENT.md) for the recommended pattern.
+
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GATEWAY_PRIVATE_KEY` | Yes* | — | 32-byte hex signing key (`0x...`). Without it the node runs in dry-run mode (unsigned records). |
