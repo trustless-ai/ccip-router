@@ -42,6 +42,7 @@ export class SQLiteDB implements DB {
     upsertPeer: Database.Statement
     getPeers: Database.Statement
     count: Database.Statement
+    ensNameCount: Database.Statement
     recent: Database.Statement
     removePeer: Database.Statement
     contributions: Database.Statement
