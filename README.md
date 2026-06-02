@@ -141,6 +141,18 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 
 Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.etherscan.io/address/0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14) · Solc 0.8.24 · optimizer 200 runs.
 
+### OffchainResolver v2 — Mainnet
+
+EIP-3668 wildcard resolver with multi-signer support. Replaces the single `signerAddress` pattern with `mapping(address => bool) authorizedSigners` so any node in the mesh can sign a valid CCIP-Read response.
+
+| Contract | Mainnet address |
+|---|---|
+| `OffchainResolver` v2 | [`0xB300e09e6C4f901409B809e7924CF68A2A429014`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014) |
+
+`dinamic.eth` is pointed at this contract. Three signers are authorized — one per active gateway node. If any node is down the ENS client falls back to the next URL automatically.
+
+Source: [`contracts/OffchainResolver.sol`](contracts/OffchainResolver.sol)
+
 **To use on Sepolia:** open the admin panel → Deploy contracts → select Sepolia → "Use these addresses →". Addresses are saved to config automatically, no deployment needed.
 
 **To deploy to another chain:** open the admin panel → Deploy contracts → select the chain → connect wallet → three transactions (one per contract). No private key is stored — MetaMask signs everything in-browser.
@@ -257,6 +269,20 @@ Both modes use the same Docker image and npm package. The difference is configur
 
 ---
 
+## Live network (dinamic.eth)
+
+Three production nodes running ccip-router `v0.5.5`, serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014):
+
+| Node | URL | Signer |
+|---|---|---|
+| ENS Boiler (primary) | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` |
+| NAS node | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` |
+| Railway node | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` |
+
+All three signers are authorized on the mainnet resolver. ENS clients try URLs in order — any live node produces a verifiable response.
+
+---
+
 ## Quick start (setup wizard)
 
 ```bash
@@ -307,6 +333,7 @@ npm run dev
 | `CDN_API_KEY` | No | — | API key / JWT for the configured CDN provider. |
 | `NETWORK_KEY` | No | — | Ethereum address. Messages signed by this key are marked as official network announcements. |
 | `DISABLE_ADMIN` | No | `false` | Set `true` to skip mounting `/admin` and `/static` entirely. Recommended for public PaaS nodes. |
+| `RESOLVER_ADDRESS` | No | — | Deployed `OffchainResolver` contract (informational — shown in spec audit). |
 
 \* Can also come from `config.json` written by the setup wizard.
 
@@ -615,6 +642,10 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] ENS records panel — live table, add/delete addr / text / addr_coin / contenthash records, changes take effect immediately
 - [x] Admin wallet panel in dashboard — current address, two-step transfer UI
 - [x] `withEns()` — ENS wildcard resolver wrapper; DNS wire-format decode, selector dispatch (addr / addr_coin / text / contenthash), null → zero-value fallbacks, `isEnsCalldata()` guard
+- [x] `OffchainResolver.sol` v2 — multi-signer via `mapping(address => bool) authorizedSigners`; `addSigner` / `removeSigner`; deployed to mainnet (`0xB300e09e6C4f901409B809e7924CF68A2A429014`); dinamic.eth updated
+- [x] Live 3-node mesh — ENS Boiler + NAS ccip-router + Railway ccip-router all authorized signers; any node can serve a verifiable CCIP-Read response
+- [x] ENS Boiler dual-write sync — every admin record upsert also pushes to ccip-router via `ccipRouterSync.ts`
+- [x] `RESOLVER_ADDRESS` config field — shown in spec audit panel
 
 ---
 
