@@ -120,13 +120,21 @@ graph TB
 
 ## Contracts
 
-Both contracts are permissionless — no owner, no admin. One deployment per chain serves all nodes.
+All ccip-router contracts are permissionless — no owner, no admin. One deployment per chain serves all nodes.
 
 | Contract | Sepolia address | Purpose |
 |---|---|---|
-| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | Anchors EIP-712 `WyriweAttestation` records on-chain. Stores `signerOf[commitmentHash]` and `commitmentOf[inputHash]`. |
+| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | ccip-router's OCP-compatible commitment store. Stores `signerOf[commitmentHash]` and `commitmentOf[inputHash]`. Valid OCP anchor — distinct from the ERC-8263 canonical contract. |
 | `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public directory of nodes. `register(url, sig)` proves key ownership via EIP-191 — the relayer (`msg.sender`) does not need to be the signing key. |
 | `WyriweAttestationVerifier` | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier` implementation. `verify(commitmentHash, abi.encode(WyriweAttestation, sig))` — recovers signer, recomputes OCP commitment, returns bool. No external calls. |
+
+**ERC-8263 canonical reference contract** (Vincent Wu, not ccip-router):
+
+| Contract | Sepolia | Mainnet |
+|---|---|---|
+| `TruthAnchorV1` | [`0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C`](https://sepolia.etherscan.io/address/0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C) | [`0xe95d6a15966984c209a62a2c188828555eb5ec3d`](https://etherscan.io/address/0xe95d6a15966984c209a62a2c188828555eb5ec3d) |
+
+`TruthAnchorV1` emits the canonical `AnchorProof(uint8 agentIdScheme, bytes32 agentId, bytes32 proofHash, address operator, bytes aux)` event that OCP's ERC-8263 extraction rule is written against. `AttestationIndex` sits alongside it as the transport-layer commitment store — the two are separate primitives by design.
 
 Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.etherscan.io/address/0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14) · Solc 0.8.24 · optimizer 200 runs.
 
@@ -506,7 +514,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 | EIP-3668 | Transport | CCIP-Read client-to-gateway | ✅ implemented |
 | WYRIWE | L2 Input trust | Triple-hash commitment, EIP-712 attestation | ✅ implemented |
 | ERC-8004 | L1 Identity | Agent identity `agentId` + `registryAddress` in attestation | ✅ implemented |
-| OCP / ERC-8263 | L3 Observation | Observation commitment hash | ✅ implemented |
+| OCP / ERC-8263 | L3 Observation | Observation commitment hash. `AttestationIndex` = OCP-compatible anchor. Canonical ERC-8263 reference: `TruthAnchorV1` (Vincent Wu). | ✅ implemented |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
 | VNI | L5 Node Identity | Signed node identity, peer gossip | ✅ implemented |
 | ERC-8275 | L6 Economics | Contribution attribution (MVP) | ✅ implemented |
