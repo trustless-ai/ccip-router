@@ -28,7 +28,8 @@
     "contracts/AttestationIndex.sol",
     "contracts/NodeRegistry.sol",
     "contracts/WyriweAttestationVerifier.sol",
-    "contracts/OffchainResolver.sol"
+    "contracts/OffchainResolver.sol",
+    "contracts/NodeRegistry.sol"
   ],
   "keywords": [
     "ccip-read",

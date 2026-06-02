@@ -141,6 +141,26 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 
 Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.etherscan.io/address/0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14) · Solc 0.8.24 · optimizer 200 runs.
 
+### NodeRegistry — Mainnet
+
+| Contract | Mainnet address |
+|---|---|
+| `NodeRegistry` | [`0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D) |
+
+Gateway nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their gateway key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Two dinamic.eth mesh nodes are registered: NAS (`0x58766f90...`) and Railway (`0x2048eADf...`).
+
+Set `NODE_REGISTRY=0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D` on any mainnet node to enable on-chain registration via `POST /admin/api/register`.
+
+**ERC-8004 identity via NodeRegistry:** Set `AGENT_ID` to your node's signer address padded to bytes32, `REGISTRY_ADDRESS` to the NodeRegistry address, and `MODEL_HASH` to `keccak256("ccip-router:<name>:<nodeUrl>")`. This gives each gateway node its own verifiable infrastructure identity — distinct from user-level ERC-8004 agent tokens.
+
+```env
+# NAS node example
+NODE_REGISTRY=0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D
+AGENT_ID=0x00000000000000000000000058766f90ede2419feafd97c28bb0f0ddf951dc54
+REGISTRY_ADDRESS=0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D
+MODEL_HASH=0x80d4afd92fa6918f6e3bf706d19b2680301e5015cf5c46ecf7f6b178cfd660fc
+```
+
 ### OffchainResolver v2 — Mainnet
 
 EIP-3668 wildcard resolver with multi-signer support. Replaces the single `signerAddress` pattern with `mapping(address => bool) authorizedSigners` so any node in the mesh can sign a valid CCIP-Read response.
@@ -273,13 +293,15 @@ Both modes use the same Docker image and npm package. The difference is configur
 
 Three production nodes running ccip-router `v0.5.5`, serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014):
 
-| Node | URL | Signer |
-|---|---|---|
-| ENS Boiler (primary) | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` |
-| NAS node | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` |
-| Railway node | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` |
+| Node | URL | Signer | Tiers |
+|---|---|---|---|
+| ENS Boiler (primary) | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, wyriwe, ocp |
+| NAS node | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, ocp, vni |
+| Railway node | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, vni |
 
 All three signers are authorized on the mainnet resolver. ENS clients try URLs in order — any live node produces a verifiable response.
+
+NAS and Railway nodes are registered in the mainnet [`NodeRegistry`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D). The NAS node's ERC-8004 identity uses its signer address as `agentId` in the NodeRegistry — infrastructure identity, not a user-level NFT agent.
 
 ---
 
