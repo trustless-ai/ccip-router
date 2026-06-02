@@ -1,5 +1,6 @@
 import './log.js'  // activate console ring buffer before anything else
 import { Hono } from 'hono'
+import { cors } from 'hono/cors'
 import { serve } from '@hono/node-server'
 import { privateKeyToAccount } from 'viem/accounts'
 import { getConfig, isConfigured } from './config.js'
@@ -21,6 +22,9 @@ import { adminRouter } from './ui/admin.js'
 import { staticRouter } from './ui/static.js'
 
 const app = new Hono()
+
+// Public CCIP gateway routes are called directly from browser clients
+app.use('*', cors({ origin: '*', allowMethods: ['GET', 'POST', 'OPTIONS'] }))
 
 // Boot sequence — config first, then conditional route registration
 const config = getConfig()
