@@ -24,6 +24,9 @@ export type Config = {
   autoDiscover:     boolean               // pull peer lists from synced peers (default: true)
   // Admin auth — claimed via SIWE on first login, decoupled from gatewayKey
   adminAddress:     string | null
+  // Decentralized CDN — optional, enables IPFS upload from admin panel
+  cdnProvider:      'pinata' | 'storacha' | null
+  cdnApiKey:        string | null
 }
 
 export type ConfigFile = {
@@ -47,6 +50,8 @@ export type ConfigFile = {
   nodeRegistry?: string
   autoDiscover?: boolean
   adminAddress?: string
+  cdnProvider?: string
+  cdnApiKey?: string
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -112,6 +117,8 @@ export function loadConfig(): Config {
     NODE_URL:            process.env.NODE_URL             ?? file.nodeUrl,
     NODE_REGISTRY:       process.env.NODE_REGISTRY        ?? file.nodeRegistry,
     AUTO_DISCOVER:       process.env.AUTO_DISCOVER        ?? String(file.autoDiscover ?? 'true'),
+    CDN_PROVIDER:        process.env.CDN_PROVIDER         ?? file.cdnProvider,
+    CDN_API_KEY:         process.env.CDN_API_KEY          ?? file.cdnApiKey,
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -169,6 +176,16 @@ export function loadConfig(): Config {
 
   const adminAddress = file.adminAddress?.trim() || null
 
+  const rawCdnProvider = raw.CDN_PROVIDER?.trim().toLowerCase()
+  const cdnProvider = (rawCdnProvider === 'pinata' || rawCdnProvider === 'storacha')
+    ? rawCdnProvider
+    : null
+  const cdnApiKey = raw.CDN_API_KEY?.trim() || null
+
+  if (cdnProvider) {
+    console.log(`[config] cdn:       provider=${cdnProvider}`)
+  }
+
   return {
     port:             parsePort(raw.PORT),
     dbPath:           raw.DB_PATH ?? './data.db',
@@ -187,6 +204,8 @@ export function loadConfig(): Config {
     nodeRegistry,
     autoDiscover,
     adminAddress,
+    cdnProvider,
+    cdnApiKey,
   }
 }
 

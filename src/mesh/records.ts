@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { getDB } from '../db/index.js'
 import { getConfig } from '../config.js'
 import { privateKeyToAccount } from 'viem/accounts'
+import { NODE_VERSION } from '../version.js'
 
 // Standard mesh sync interface — any CCIP gateway implementing this is mesh-compatible
 // GET /records?since=<unix_timestamp>&namespace=<string>&limit=<n>&cursor=<string>
@@ -23,7 +24,7 @@ recordsRouter.get('/', async (c) => {
 
   return c.json({
     protocol:     1,
-    node_version: '0.2.0',
+    node_version: NODE_VERSION,
     namespace,
     records,
     cursor:       nextCursor,
@@ -41,7 +42,7 @@ peersRouter.get('/', async (c) => {
   const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
     protocol:       1,
-    node_version:  '0.2.0',
+    node_version:  NODE_VERSION,
     signerAddress,
     peers: peers.map((p) => ({
       url:           p.url,

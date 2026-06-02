@@ -198,7 +198,7 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 |---|---|---|
 | `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | OCP-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
 | `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public node directory |
-| `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96) | ERC-8274 `IProofVerifier` |
+| `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96#code) | ERC-8274 `IProofVerifier` |
 | `WyriweAttestationVerifier` *(deprecated)* | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier` — superseded |
 
 **ERC-8263 canonical reference** (not ccip-router — referenced here for completeness):
@@ -209,7 +209,7 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 
 `AttestationIndex` is a valid OCP-compatible anchor but is distinct from `TruthAnchorV1` — the canonical ERC-8263 contract (Vincent Wu) that emits `AnchorProof` with `agentIdScheme`. The two are separate primitives by design.
 
-**How ccip-router connects to ERC-8263:** `proofHash` in `TruthAnchorV1` = `commitmentHash` in `WyriweAttestation` = `keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))`. The full chain: gateway signs `WyriweAttestation` → `anchor(commitmentHash)` called on `TruthAnchorV1` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by `proofHash` topic (= your `commitmentHash`) via `eth_getLogs`. `TruthAnchorV1` V1 is event-only by design — no per-anchor storage. A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
+**How ccip-router connects to ERC-8263:** ccip-router anchors its `commitmentHash` as the `proofHash` in `TruthAnchorV1`. ERC-8263's `proofHash` is deliberately opaque — the same anchor layer serves OCP, WYRIWE, and zkML uniformly. ccip-router's `commitmentHash = keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))` is one canonical instantiation of it, not the definition. Full chain: gateway signs `WyriweAttestation` (producing `commitmentHash`) → `anchor(commitmentHash)` called on `TruthAnchorV1` as the `proofHash` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by `proofHash` topic (= your `commitmentHash`) via `eth_getLogs`. V1 is event-only by design — no per-anchor storage. A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
 
 **Via admin panel:** Deploy contracts → select Sepolia → "Use these addresses →". Done.
 

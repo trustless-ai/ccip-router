@@ -2,6 +2,7 @@ import type { DB, MeshRecord, PeerState } from '../db/types.js'
 import type { Config } from '../config.js'
 import { recoverRecordSigner } from '../crypto/index.js'
 import { fetchPeerVni, verifyVni } from './vni.js'
+import { NODE_VERSION } from '../version.js'
 
 // Manual sync trigger — used by the admin dashboard "Sync now" button.
 export async function syncAll(config: Config, db: DB): Promise<number> {
@@ -80,11 +81,20 @@ export async function syncPeer(
     // Auto-discovery: pull peer's known peers and add any new ones
     if (autoDiscover) await discoverPeers(peer, db)
 
+    const resolvedVersion = vni?.version ?? health?.version ?? peer.nodeVersion ?? null
+
+    if (resolvedVersion && isOlderVersion(resolvedVersion, NODE_VERSION)) {
+      console.warn(
+        `[sync] ${peer.url} is running v${resolvedVersion} — we are v${NODE_VERSION}. ` +
+        `Peer should upgrade.`,
+      )
+    }
+
     return {
       healthy:       true,
       lastSyncAt:    Math.floor(Date.now() / 1000),
-      nodeVersion:   vni?.version           ?? health?.version      ?? peer.nodeVersion,
-      signerAddress: vniSigner              ?? discoveredSigner      ?? health?.signerAddress ?? peer.signerAddress,
+      nodeVersion:   resolvedVersion,
+      signerAddress: vniSigner ?? discoveredSigner ?? health?.signerAddress ?? peer.signerAddress,
     }
   } catch (err) {
     console.warn(`[sync] ${peer.url} unreachable — ${String(err)}`)
@@ -137,8 +147,20 @@ function buildRecordsUrl(
   url.searchParams.set('namespace', namespace)
   url.searchParams.set('since', String(since))
   url.searchParams.set('limit', '500')
+  url.searchParams.set('protocol', String(SUPPORTED_PROTOCOL))
   if (cursor) url.searchParams.set('cursor', cursor)
   return url.toString()
+}
+
+// Returns true if `a` is an older semver than `b`. Non-semver strings return false.
+function isOlderVersion(a: string, b: string): boolean {
+  const parse = (v: string) => v.split('.').map(Number)
+  const [aMaj, aMin, aPatch] = parse(a)
+  const [bMaj, bMin, bPatch] = parse(b)
+  if (isNaN(aMaj) || isNaN(bMaj)) return false
+  if (aMaj !== bMaj) return aMaj < bMaj
+  if (aMin !== bMin) return aMin < bMin
+  return (aPatch ?? 0) < (bPatch ?? 0)
 }
 
 async function fetchRecords(url: string): Promise<RecordsResponse> {

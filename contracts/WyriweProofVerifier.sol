@@ -47,6 +47,27 @@ contract WyriweProofVerifier is IProofVerifier {
     // ── IProofVerifier ────────────────────────────────────────────────────────
 
     /// @inheritdoc IProofVerifier
+    ///
+    /// @dev  Authorization design — three layers, no registry key lookup:
+    ///
+    ///       1. **commitmentHash binding** — the commitment recomputed from
+    ///          (agentId, modelHash, inputHash, outputHash, timestamp) must match
+    ///          the one inside the signed struct.  Only the gateway that signed the
+    ///          correct agentId+modelHash combination can produce a struct that passes.
+    ///          This is the primary implicit authorization for agentId.
+    ///
+    ///       2. **EIP-712 domain binding** — `registry` is the `verifyingContract`
+    ///          in the domain separator.  A signature made for registry A will not
+    ///          verify against registry B; domain authorization is implicit without
+    ///          an on-chain lookup.
+    ///
+    ///       3. **ecrecover non-zero** — confirms the struct was signed by *someone*
+    ///          with a valid key.
+    ///
+    ///       What this verifier does NOT do: call `IRegistry(registry).getGatewayKey(agentId)`
+    ///       and check the recovered signer against it.  The question "was that signer
+    ///       actually authorized for this agentId on-chain?" is left to the caller or
+    ///       a WYRIWE-specific wrapper.  Add that check there if your trust model requires it.
     function verify(
         bytes32 inputHash,
         bytes32 outputHash,

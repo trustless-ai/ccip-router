@@ -10,6 +10,9 @@ import { requireAdmin, setAdminSession, clearAdminSession } from './auth.js'
 import { generateNonce, verifySiwe } from './siwe.js'
 import { publishAttestation, type ChainOpts } from '../chain/publish.js'
 import { registerNode } from '../chain/register.js'
+import { getCdnProvider } from '../cdn/index.js'
+import { namehash } from 'viem/ens'
+import { NODE_VERSION } from '../version.js'
 
 export const adminRouter = new Hono()
 
@@ -132,7 +135,7 @@ adminRouter.get('/api/status', async (c) => {
   ])
   const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
-    version: '0.2.0', signerAddress,
+    version: NODE_VERSION, signerAddress,
     adminAddress: config.adminAddress ?? null,
     adminClaimed: !!config.adminAddress,
     namespace: config.syncNamespace, syncInterval: config.syncInterval,
@@ -487,6 +490,42 @@ adminRouter.delete('/api/ens-records', async (c) => {
   if (!name || !type) return c.json({ error: 'name and type required' }, 400)
   await getDB().deleteNameRecord(name, type, body.coinType ?? -1, body.textKey ?? '')
   return c.json({ ok: true })
+})
+
+// ── IPFS / CDN API ────────────────────────────────────────────────────────────
+
+adminRouter.get('/api/cdn/status', (c) => {
+  const config = getConfig()
+  return c.json({ provider: config.cdnProvider ?? null, configured: !!(config.cdnProvider && config.cdnApiKey) })
+})
+
+adminRouter.post('/api/cdn/upload', async (c) => {
+  const config = getConfig()
+  const provider = getCdnProvider(config)
+  if (!provider) return c.json({ error: 'CDN not configured — set CDN_PROVIDER and CDN_API_KEY' }, 503)
+
+  const body = await c.req.parseBody()
+  const file = body['file']
+  if (!file || typeof file === 'string') return c.json({ error: 'file field required' }, 400)
+
+  const buffer = Buffer.from(await file.arrayBuffer())
+  try {
+    const cid = await provider.upload(buffer, file.name, file.type || 'application/octet-stream')
+    return c.json({ cid, provider: provider.name })
+  } catch (err) {
+    return c.json({ error: String(err) }, 502)
+  }
+})
+
+adminRouter.get('/api/cdn/namehash', (c) => {
+  const name = c.req.query('name')
+  if (!name) return c.json({ error: 'name required' }, 400)
+  try {
+    const node = namehash(name)
+    return c.json({ node })
+  } catch {
+    return c.json({ error: 'invalid ENS name' }, 400)
+  }
 })
 
 // ── Dashboard HTML ────────────────────────────────────────────────────────────
@@ -1545,6 +1584,78 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="audit-panel" id="ipfs-panel" style="margin-top:16px">
+    <div class="audit-header" id="ipfs-header" onclick="toggleIpfsPanel()">
+      <div class="panel-title">IPFS &amp; browser resolution</div>
+      <span class="audit-chevron" id="ipfs-chevron">▼</span>
+    </div>
+    <div id="ipfs-body" style="display:none">
+      <div class="config-form">
+
+        <div class="config-section">
+          <div class="config-section-title">Provider</div>
+          <p style="font-size:13px;color:var(--subtle);margin:0 0 10px">
+            Upload files to a decentralized CDN and set the resulting CID as the
+            <code style="font-family:var(--mono);font-size:11px;background:var(--s2);padding:2px 5px;border-radius:4px">contenthash</code>
+            on any ENS name via MetaMask. Native ENS browsers (Brave, eth.link) resolve
+            <code style="font-family:var(--mono);font-size:11px;background:var(--s2);padding:2px 5px;border-radius:4px">contenthash</code>
+            directly on-chain — no CCIP-Read involved.
+          </p>
+          <div id="cdn-status-row" style="font-size:12px;padding:8px 12px;border-radius:6px;background:var(--s2);margin-bottom:4px">
+            Loading…
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Upload file</div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">File</label>
+              <input class="cfg-input" type="file" id="ipfs-file" style="padding:6px"/>
+            </div>
+            <div class="cfg-field" style="display:flex;align-items:flex-end">
+              <button class="cfg-save-btn" onclick="uploadToIpfs()" id="ipfs-upload-btn">Upload</button>
+            </div>
+          </div>
+          <div id="ipfs-upload-status" style="font-size:12px;color:var(--subtle);margin-top:6px"></div>
+          <div class="cfg-hint">File is pinned via your configured CDN provider. CID is auto-filled below.</div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Set contenthash on ENS</div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">ENS name (e.g. vitalik.eth)</label>
+              <input class="cfg-input" type="text" id="ipfs-ens-name" placeholder="name.eth"/>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">IPFS CID</label>
+              <input class="cfg-input" type="text" id="ipfs-cid" placeholder="Qm... or bafy..."/>
+            </div>
+          </div>
+          <div class="cfg-row-2" style="margin-top:8px">
+            <div class="cfg-field">
+              <label class="cfg-label">Network</label>
+              <select class="cfg-input" id="ipfs-chain" style="width:100%">
+                <option value="1">Ethereum Mainnet</option>
+                <option value="11155111">Sepolia</option>
+              </select>
+            </div>
+            <div class="cfg-field" style="display:flex;align-items:flex-end">
+              <button class="cfg-save-btn" onclick="setContenthash()" id="ipfs-set-btn">Set via MetaMask</button>
+            </div>
+          </div>
+          <div id="ipfs-set-status" style="font-size:12px;color:var(--subtle);margin-top:6px"></div>
+          <div class="cfg-hint">
+            Calls <code style="font-family:var(--mono);font-size:11px">setContenthash(namehash, encode(CID))</code> on the ENS Public Resolver.
+            Also saves the record locally so CCIP-Read resolvers serve it dynamically.
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <div class="audit-panel" id="deploy-panel" style="margin-top:16px">
     <div class="audit-header" id="deploy-header" onclick="toggleDeployPanel()">
       <div class="panel-title">Deploy contracts</div>
@@ -1642,17 +1753,22 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
   function trunc(s, n) { return s && s.length > n ? s.slice(0,6)+'...'+s.slice(-4) : (s||'—') }
 
-  function renderPeers(peers) {
+  function renderPeers(peers, ourVersion) {
     const el = document.getElementById('peers-list')
     if (!peers.length) {
       el.innerHTML = '<div class="empty">No peers yet.<br>Add a URL below to join the mesh.</div>'
       return
     }
-    el.innerHTML = peers.map(p => \`
+    el.innerHTML = peers.map(p => {
+      const outdated = p.nodeVersion && ourVersion && isOlderSemver(p.nodeVersion, ourVersion)
+      const badge    = outdated
+        ? \` <span style="font-size:10px;background:#f59e0b;color:#000;padding:1px 5px;border-radius:3px;margin-left:4px">upgrade v\${p.nodeVersion}</span>\`
+        : ''
+      return \`
       <div class="peer-row">
         <div class="health-dot \${p.healthy ? 'ok' : 'err'}"></div>
         <div class="peer-info">
-          <div class="peer-url">\${p.url}</div>
+          <div class="peer-url">\${p.url}\${badge}</div>
           <div class="peer-meta">\${trunc(p.signerAddress,20)} · \${rel(p.lastSyncAt)}\${p.nodeVersion ? ' · v'+p.nodeVersion : ''}</div>
         </div>
         <div class="peer-actions">
@@ -1660,7 +1776,16 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
           <button class="btn btn-danger btn-sm btn-icon" title="Remove" onclick="removePeer('\${p.url}')">✕</button>
         </div>
       </div>
-    \`).join('')
+    \`}).join('')
+  }
+
+  function isOlderSemver(a, b) {
+    const p = v => v.split('.').map(Number)
+    const [aM, am, ap] = p(a); const [bM, bm, bp] = p(b)
+    if (isNaN(aM) || isNaN(bM)) return false
+    if (aM !== bM) return aM < bM
+    if (am !== bm) return am < bm
+    return (ap ?? 0) < (bp ?? 0)
   }
 
   function renderRecords(records) {
@@ -1721,7 +1846,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('s-sync').textContent     = syncs.length ? rel(Math.max(...syncs)) : 'never'
     document.getElementById('s-interval').textContent = d.syncInterval
 
-    renderPeers(d.peers)
+    renderPeers(d.peers, d.version)
     renderRecords(d.recent)
 
     document.getElementById('ni-addr').textContent     = d.signerAddress || 'dry-run'
@@ -2190,6 +2315,161 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('ens-body').style.display    = ensOpen ? 'block' : 'none'
     document.getElementById('ens-chevron').textContent   = ensOpen ? '▲' : '▼'
     if (ensOpen) loadEnsRecords()
+  }
+
+  // ── IPFS panel ──────────────────────────────────────────────────────────────
+
+  let ipfsOpen = false
+
+  function toggleIpfsPanel() {
+    ipfsOpen = !ipfsOpen
+    document.getElementById('ipfs-body').style.display   = ipfsOpen ? 'block' : 'none'
+    document.getElementById('ipfs-chevron').textContent  = ipfsOpen ? '▲' : '▼'
+    if (ipfsOpen) loadCdnStatus()
+  }
+
+  async function loadCdnStatus() {
+    const row = document.getElementById('cdn-status-row')
+    try {
+      const res  = await fetch('/admin/api/cdn/status')
+      const data = await res.json()
+      if (data.configured) {
+        row.style.color = 'var(--green, #4caf50)'
+        row.textContent = '✓ Provider configured: ' + data.provider
+      } else {
+        row.style.color = 'var(--subtle)'
+        row.textContent = 'Not configured — set CDN_PROVIDER (pinata | storacha) and CDN_API_KEY in node config or env'
+      }
+    } catch { row.textContent = 'Could not load CDN status' }
+  }
+
+  async function uploadToIpfs() {
+    const fileInput = document.getElementById('ipfs-file')
+    const status    = document.getElementById('ipfs-upload-status')
+    const btn       = document.getElementById('ipfs-upload-btn')
+    if (!fileInput.files.length) { status.textContent = 'Select a file first'; return }
+
+    btn.disabled = true
+    status.textContent = 'Uploading…'
+    const form = new FormData()
+    form.append('file', fileInput.files[0])
+
+    try {
+      const res  = await fetch('/admin/api/cdn/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || res.statusText)
+      document.getElementById('ipfs-cid').value = data.cid
+      status.textContent = '✓ Pinned via ' + data.provider + ': ' + data.cid
+    } catch (err) {
+      status.textContent = '✕ ' + (err.message || String(err))
+    } finally {
+      btn.disabled = false
+    }
+  }
+
+  // Minimal base58 decode (for CIDv0 Qm...)
+  const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+  function decodeBase58(s) {
+    let n = 0n
+    for (const c of s) { const i = B58.indexOf(c); if (i < 0) throw new Error('Bad base58: ' + c); n = n * 58n + BigInt(i) }
+    const bytes = []; while (n > 0n) { bytes.unshift(Number(n & 0xffn)); n >>= 8n }
+    for (let i = 0; i < s.length && s[i] === '1'; i++) bytes.unshift(0)
+    return new Uint8Array(bytes)
+  }
+
+  // Minimal base32 decode (for CIDv1 bafy... = 'b' multibase prefix + base32lower)
+  const B32 = 'abcdefghijklmnopqrstuvwxyz234567'
+  function decodeBase32(s) {
+    s = s.toLowerCase().replace(/=+$/, '')
+    const bytes = []; let buf = 0, bits = 0
+    for (const c of s) { const i = B32.indexOf(c); if (i < 0) throw new Error('Bad base32: ' + c); buf = (buf << 5) | i; bits += 5; if (bits >= 8) { bytes.push((buf >> (bits - 8)) & 0xff); bits -= 8 } }
+    return new Uint8Array(bytes)
+  }
+
+  function cidToContenthash(cid) {
+    cid = cid.trim()
+    let cidBytes
+    if (cid.startsWith('Qm'))     cidBytes = decodeBase58(cid)          // CIDv0
+    else if (cid.startsWith('b')) cidBytes = decodeBase32(cid.slice(1)) // CIDv1 base32, strip 'b' multibase prefix
+    else throw new Error('Unsupported CID. Expected Qm... (CIDv0) or b... (CIDv1 base32)')
+    const out = new Uint8Array(2 + cidBytes.length)
+    out[0] = 0xe3; out[1] = 0x01 // ipfs-ns multicodec varint
+    out.set(cidBytes, 2)
+    return '0x' + Array.from(out, b => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  // ABI-encode setContenthash(bytes32 node, bytes calldata hash)
+  function encodeSetContenthash(nodeHex, contenthashHex) {
+    const selector  = '304e6ade'
+    const node      = nodeHex.slice(2).padStart(64, '0')
+    const offset    = '0000000000000000000000000000000000000000000000000000000000000040'
+    const bytes     = contenthashHex.startsWith('0x') ? contenthashHex.slice(2) : contenthashHex
+    const byteLen   = bytes.length / 2
+    const lenHex    = byteLen.toString(16).padStart(64, '0')
+    const padded    = bytes.padEnd(Math.ceil(byteLen / 32) * 64, '0')
+    return '0x' + selector + node + offset + lenHex + padded
+  }
+
+  const ENS_RESOLVERS = {
+    1:         '0x231b0Ee14048e9dCcD1d247744d114a4EB5E8E63', // Mainnet
+    11155111:  '0x8FADE66B79cC9f707aB26799354482EB93a5B7dD', // Sepolia
+  }
+
+  async function setContenthash() {
+    const ensName  = document.getElementById('ipfs-ens-name').value.trim()
+    const cid      = document.getElementById('ipfs-cid').value.trim()
+    const chainId  = parseInt(document.getElementById('ipfs-chain').value)
+    const status   = document.getElementById('ipfs-set-status')
+    const btn      = document.getElementById('ipfs-set-btn')
+
+    if (!ensName) { status.textContent = 'Enter an ENS name'; return }
+    if (!cid)     { status.textContent = 'Enter or upload a CID first'; return }
+    if (!window.ethereum) { status.textContent = 'MetaMask not found'; return }
+
+    btn.disabled = true
+    status.textContent = 'Preparing…'
+
+    try {
+      // Get namehash from server (uses viem)
+      const nhRes  = await fetch('/admin/api/cdn/namehash?name=' + encodeURIComponent(ensName))
+      const nhData = await nhRes.json()
+      if (!nhRes.ok) throw new Error(nhData.error)
+      const node = nhData.node
+
+      // Encode contenthash
+      const contenthash = cidToContenthash(cid)
+      const calldata    = encodeSetContenthash(node, contenthash)
+
+      // Switch chain
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x' + chainId.toString(16) }],
+      })
+
+      const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      const resolver   = ENS_RESOLVERS[chainId]
+      if (!resolver) throw new Error('No known ENS resolver for chain ' + chainId)
+
+      status.textContent = 'Waiting for MetaMask confirmation…'
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from: account, to: resolver, data: calldata }],
+      })
+
+      status.textContent = '✓ tx sent: ' + txHash
+
+      // Also save as contenthash ENS record in local DB for CCIP-Read
+      await fetch('/admin/api/ens-records', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: ensName, type: 'contenthash', value: contenthash }),
+      })
+      toast('Contenthash set on-chain + saved locally')
+    } catch (err) {
+      status.textContent = '✕ ' + (err.message || String(err))
+    } finally {
+      btn.disabled = false
+    }
   }
 
   function onEnsTypeChange() {
