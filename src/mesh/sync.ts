@@ -9,7 +9,7 @@ export async function syncAll(config: Config, db: DB): Promise<number> {
   const peers = await db.getPeers()
   const results = await Promise.allSettled(
     peers.map(async (peer) => {
-      const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover)
+      const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl)
       await db.upsertPeer({ ...peer, ...update })
     }),
   )
@@ -38,6 +38,7 @@ export async function syncPeer(
   namespace: string,
   db: DB,
   autoDiscover = true,
+  nodeUrl?: string,
 ): Promise<Partial<PeerState>> {
   let cursor: string | undefined = undefined
   let inserted = 0
@@ -79,7 +80,7 @@ export async function syncPeer(
     const health = await fetchPeerHealth(peer.url)
 
     // Auto-discovery: pull peer's known peers and add any new ones
-    if (autoDiscover) await discoverPeers(peer, db, config)
+    if (autoDiscover) await discoverPeers(peer, db, nodeUrl)
 
     const resolvedVersion = vni?.version ?? health?.version ?? peer.nodeVersion ?? null
 
@@ -183,7 +184,7 @@ async function fetchPeerHealth(baseUrl: string): Promise<HealthResponse | null> 
 
 // Fetch the peer's /peers list and add any newly discovered nodes to our DB.
 // Bounded to 10 new peers per sync cycle — prevents runaway growth.
-async function discoverPeers(peer: PeerState, db: DB, config: Config): Promise<void> {
+async function discoverPeers(peer: PeerState, db: DB, nodeUrl?: string): Promise<void> {
   try {
     const res = await fetch(new URL('/peers', peer.url).toString(), {
       signal: AbortSignal.timeout(5_000),
@@ -194,7 +195,7 @@ async function discoverPeers(peer: PeerState, db: DB, config: Config): Promise<v
 
     const existing = new Set((await db.getPeers()).map((p) => p.url))
     let added = 0
-    const selfUrl = config.nodeUrl?.replace(/\/$/, '') ?? ''
+    const selfUrl = nodeUrl?.replace(/\/$/, '') ?? ''
     for (const discovered of data.peers) {
       if (added >= 10) break
       if (!discovered.url || existing.has(discovered.url)) continue
