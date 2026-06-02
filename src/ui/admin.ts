@@ -1154,14 +1154,35 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     .cfg-field input[type=text],
     .cfg-field input[type=number],
     .cfg-field input[type=password],
+    .cfg-field input[type=file],
+    .cfg-field select,
     .cfg-field textarea {
       width: 100%; background: rgba(255,255,255,0.03);
       border: 1px solid var(--border); border-radius: 9px;
       color: var(--text); font-size: 12px; font-family: inherit;
       padding: 9px 12px; outline: none; transition: border-color 0.15s;
+      box-sizing: border-box;
     }
-    .cfg-field input:focus, .cfg-field textarea:focus { border-color: rgba(99,102,241,0.5); }
+    .cfg-field select { appearance: none; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 28px; }
+    .cfg-field input[type=file] { cursor: pointer; }
+    .cfg-field input[type=file]::file-selector-button {
+      background: var(--s2); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--subtle); font-size: 11px; font-family: inherit;
+      padding: 4px 10px; margin-right: 10px; cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .cfg-field input[type=file]::file-selector-button:hover { border-color: var(--border-h); color: var(--text); }
+    .cfg-field input:focus, .cfg-field select:focus, .cfg-field textarea:focus { border-color: rgba(99,102,241,0.5); }
     .cfg-field textarea { min-height: 72px; resize: vertical; font-family: var(--mono); }
+    .cfg-save-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      background: var(--accent); color: #fff; border: none; border-radius: 9px;
+      font-size: 12px; font-family: inherit; font-weight: 500;
+      padding: 9px 16px; cursor: pointer; white-space: nowrap;
+      box-shadow: 0 0 16px rgba(99,102,241,0.2); transition: background 0.15s, box-shadow 0.15s;
+    }
+    .cfg-save-btn:hover { background: var(--accent-v); box-shadow: 0 0 24px rgba(139,92,246,0.3); }
+    .cfg-save-btn:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
     .cfg-hint { font-size: 11px; color: var(--muted); margin-top: 5px; font-weight: 300; }
     .cfg-readonly {
       display: flex; align-items: center; justify-content: space-between;
@@ -1590,7 +1611,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
             </div>
             <div class="cfg-field">
               <label class="cfg-label">Type</label>
-              <select class="cfg-input" id="ens-type" onchange="onEnsTypeChange()" style="width:100%">
+              <select class="cfg-input" id="ens-type" onchange="onEnsTypeChange()">
                 <option value="addr">addr — ETH address</option>
                 <option value="addr_coin">addr_coin — multi-coin</option>
                 <option value="text">text — text record</option>
@@ -1643,7 +1664,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
           <div class="cfg-row-2">
             <div class="cfg-field">
               <label class="cfg-label">File</label>
-              <input class="cfg-input" type="file" id="ipfs-file" style="padding:6px"/>
+              <input class="cfg-input" type="file" id="ipfs-file"/>
             </div>
             <div class="cfg-field" style="display:flex;align-items:flex-end">
               <button class="cfg-save-btn" onclick="uploadToIpfs()" id="ipfs-upload-btn">Upload</button>
@@ -1668,7 +1689,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
           <div class="cfg-row-2" style="margin-top:8px">
             <div class="cfg-field">
               <label class="cfg-label">Network</label>
-              <select class="cfg-input" id="ipfs-chain" style="width:100%">
+              <select class="cfg-input" id="ipfs-chain">
                 <option value="1">Ethereum Mainnet</option>
                 <option value="11155111">Sepolia</option>
               </select>
@@ -1716,7 +1737,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
           <div class="cfg-row-2">
             <div class="cfg-field">
               <label class="cfg-label">Type</label>
-              <select class="cfg-input" id="msg-type" style="width:100%">
+              <select class="cfg-input" id="msg-type">
                 <option value="upgrade_notice">upgrade_notice</option>
                 <option value="deprecation">deprecation</option>
                 <option value="network_announcement">network_announcement</option>
