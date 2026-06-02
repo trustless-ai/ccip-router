@@ -54,9 +54,9 @@ Both modes use the same Docker image and the same `npm` package. The difference 
 
 ---
 
-## Operator node — self-hosted (Docker / Coolify)
+## Operator node — self-hosted (Docker)
 
-Use `network_mode: host` and a dedicated port (e.g. `4100`) so Traefik/Coolify can route to it without NAT complexity.
+Use `network_mode: host` and a dedicated port (e.g. `4100`) so your reverse proxy can route to it without NAT complexity.
 
 > **Never put `GATEWAY_PRIVATE_KEY` directly in your compose file.** Use `env_file` so the key stays out of any file you might share, commit, or view in a UI.
 
@@ -88,9 +88,9 @@ services:
 
 `env_file` values are loaded at container start. To rotate the key: update `ccip-router.env` and restart — the compose file stays clean.
 
-### Traefik dynamic config (if behind Coolify/Traefik)
+### Reverse proxy config (Traefik example)
 
-Drop a file in your Traefik dynamic config directory:
+If your self-hosted instance uses Traefik, drop a file in its dynamic config directory:
 
 ```yaml
 # /path/to/traefik/dynamic/ccip-router.yaml
@@ -113,7 +113,7 @@ http:
 In Cloudflare Zero Trust → Networks → Tunnels → your tunnel → Public Hostnames:
 - Subdomain: `gateway` (or your choice)
 - Domain: `your-domain.com`
-- Service: `http://localhost:8090` (Traefik HTTP entrypoint)
+- Service: `http://localhost:8090` (your reverse proxy HTTP entrypoint)
 
 After first boot, open `https://your-gateway.example.com/admin` and sign in with MetaMask (the wallet that holds `GATEWAY_PRIVATE_KEY`). The first wallet to sign claims the admin session permanently.
 
@@ -189,7 +189,7 @@ Never commit private keys. Use `env_file` (self-hosted) or the platform's secret
 
 ## Mesh security notes
 
-- **Keep secrets out of compose files:** store `GATEWAY_PRIVATE_KEY`, `CDN_API_KEY`, and `ADMIN_SECRET` in a `chmod 600` env file loaded via `env_file:`, not inline in your compose YAML. Compose files are easy to accidentally expose — in logs, Coolify UI, or version control.
+- **Keep secrets out of compose files:** store `GATEWAY_PRIVATE_KEY`, `CDN_API_KEY`, and `ADMIN_SECRET` in a `chmod 600` env file loaded via `env_file:`, not inline in your compose YAML. Compose files are easy to accidentally expose — in management UI logs, shared configs, or version control.
 - **Signer pinning:** on first sync from a peer, the recovered signer address is stored. Subsequent records from a different signer are rejected — a compromised peer cannot inject records on behalf of another node.
 - **Rate limiting:** the `/messages` endpoint accepts at most 10 messages per peer signer per hour.
 - **Admin surface:** always set `DISABLE_ADMIN=true` on any publicly-accessible node unless you specifically need the dashboard reachable. The dashboard is SIWE-protected, but reducing attack surface is always better.

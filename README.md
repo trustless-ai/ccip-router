@@ -246,12 +246,12 @@ ccip-router runs in two modes — any combination can form a mesh.
 
 | Mode | Description | Typical host |
 |---|---|---|
-| **Operator node** | Admin dashboard, signing key, ENS records, attestation pipeline | Self-hosted (Docker / Coolify / VPS) |
+| **Operator node** | Admin dashboard, signing key, ENS records, attestation pipeline | Self-hosted (Docker / VPS / home server) |
 | **Public node** | Mesh sync + CCIP-Read serving only. No admin surface, no key UI. Set `DISABLE_ADMIN=true` | Any PaaS (Railway, Fly, Render) |
 
 Both modes use the same Docker image and npm package. The difference is configuration only.
 
-**→ [Full deployment guide](DEPLOYMENT.md)** — Docker / Coolify operator setup, Railway one-click public node, peering, Cloudflare Tunnel, multi-URL resolver, key generation, security notes.
+**→ [Full deployment guide](DEPLOYMENT.md)** — self-hosted operator setup, Railway one-click public node, reverse proxy config, Cloudflare Tunnel, multi-URL resolver, key generation, security notes.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/ccip-router)
 
