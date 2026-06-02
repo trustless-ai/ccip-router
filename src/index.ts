@@ -22,12 +22,20 @@ import { staticRouter } from './ui/static.js'
 
 const app = new Hono()
 
+// Boot sequence — config first, then conditional route registration
+const config = getConfig()
+
 // Setup wizard — shown when node has no gateway key configured
 app.route('/setup', setupRouter)
-app.route('/admin', adminRouter)
-app.route('/', staticRouter)
+
+if (!config.disableAdmin) {
+  app.route('/admin', adminRouter)
+  app.route('/', staticRouter)
+}
+
 app.get('/', (c) => {
   if (!isConfigured()) return c.redirect('/setup')
+  if (config.disableAdmin) return c.json({ ok: true, node: 'ccip-router', version: NODE_VERSION })
   return c.redirect('/admin')
 })
 
@@ -39,8 +47,6 @@ app.use('*', async (c, next) => {
   await next()
 })
 
-// Boot sequence — config first, then DB, then routes
-const config = getConfig()
 const db = getDB(config.dbPath)
 
 // Seed configured peers into DB on startup.
