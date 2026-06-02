@@ -124,6 +124,10 @@ export class SQLiteDB implements DB {
         SELECT COUNT(*) as n FROM records WHERE namespace = ?
       `),
 
+      ensNameCount: this.db.prepare(`
+        SELECT COUNT(DISTINCT name) as n FROM ens_records
+      `),
+
       recent: this.db.prepare(`
         SELECT * FROM records
         WHERE namespace = ?
@@ -286,6 +290,11 @@ export class SQLiteDB implements DB {
 
   async recordCount(namespace: string): Promise<number> {
     const row = this.stmts.count.get(namespace) as { n: number }
+    return row.n
+  }
+
+  async ensNameCount(): Promise<number> {
+    const row = this.stmts.ensNameCount.get() as { n: number }
     return row.n
   }
 

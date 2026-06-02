@@ -61,6 +61,7 @@ export interface DB {
   removePeer(url: string): Promise<void>
   getPeers(): Promise<PeerState[]>
   recordCount(namespace: string): Promise<number>
+  ensNameCount(): Promise<number>
   // Mesh messages — signed push notifications from peers
   insertMessage(msg: Omit<Message, 'id' | 'receivedAt'>): Promise<number>
   getMessages(limit?: number): Promise<Message[]>

@@ -146,10 +146,11 @@ app.get('/contributions', async (c) => {
 app.route('/', ccip.hono())
 
 app.get('/health', async (c) => {
-  const [peers, count, wyriweCount] = await Promise.all([
+  const [peers, count, wyriweCount, ensCount] = await Promise.all([
     db.getPeers(),
     db.recordCount(config.syncNamespace),
     db.recordCount(config.syncNamespace + ':wyriwe'),
+    db.ensNameCount(),
   ])
   return c.json({
     ok:            true,
@@ -174,6 +175,7 @@ app.get('/health', async (c) => {
       lastSyncAt:    p.lastSyncAt,
     })),
     records:       count,
+    ensRecords:    ensCount,
   })
 })
 
