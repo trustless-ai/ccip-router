@@ -31,6 +31,8 @@ export type Config = {
   networkKey:       string | null
   // Public node mode — disables admin panel entirely (no /admin routes mounted)
   disableAdmin:     boolean
+  // On-chain CCIP-Read resolver contract (informational — shown in spec audit)
+  resolverAddress:  `0x${string}` | null
 }
 
 export type ConfigFile = {
@@ -58,6 +60,7 @@ export type ConfigFile = {
   cdnApiKey?: string
   networkKey?: string
   disableAdmin?: boolean
+  resolverAddress?: string
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -127,6 +130,7 @@ export function loadConfig(): Config {
     CDN_API_KEY:         process.env.CDN_API_KEY          ?? file.cdnApiKey,
     NETWORK_KEY:         process.env.NETWORK_KEY          ?? file.networkKey,
     DISABLE_ADMIN:       process.env.DISABLE_ADMIN        ?? String(file.disableAdmin ?? 'false'),
+    RESOLVER_ADDRESS:    process.env.RESOLVER_ADDRESS     ?? file.resolverAddress,
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -191,6 +195,9 @@ export function loadConfig(): Config {
   const cdnApiKey  = raw.CDN_API_KEY?.trim() || null
   const networkKey   = raw.NETWORK_KEY?.trim() || null
   const disableAdmin = raw.DISABLE_ADMIN?.toLowerCase() === 'true'
+  const resolverAddress = raw.RESOLVER_ADDRESS?.trim()
+    ? requireHex('RESOLVER_ADDRESS', raw.RESOLVER_ADDRESS.trim())
+    : null
 
   if (disableAdmin) {
     console.log('[config] admin:     disabled (public node mode)')
@@ -222,6 +229,7 @@ export function loadConfig(): Config {
     cdnApiKey,
     networkKey,
     disableAdmin,
+    resolverAddress,
   }
 }
 

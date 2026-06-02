@@ -189,6 +189,7 @@ adminRouter.get('/api/audit', async (c) => {
         { k: 'Endpoint',   v: '/{sender}/{data}.json' },
         { k: 'Signing',    v: signerAddress ? 'EIP-191' : 'dry-run (unsigned)' },
         { k: 'Signer',     v: signerAddress ?? 'not configured' },
+        { k: 'Resolver',   v: config.resolverAddress ?? 'not configured — set RESOLVER_ADDRESS' },
         { k: 'Namespace',  v: config.syncNamespace },
         { k: 'Records',    v: String(count) },
       ],
@@ -373,6 +374,7 @@ adminRouter.get('/api/config', (c) => {
     rpcUrl:           config.rpcUrl           ?? '',
     attestationIndex: config.attestationIndex ?? '',
     nodeRegistry:     config.nodeRegistry     ?? '',
+    resolverAddress:  config.resolverAddress  ?? '',
     hasAdminSecret:   !!config.adminSecret,
     adminAddress:     config.adminAddress  ?? '',
     adminClaimed:     !!config.adminAddress,
@@ -395,6 +397,7 @@ adminRouter.post('/api/config', async (c) => {
     rpcUrl?:           string
     attestationIndex?: string
     nodeRegistry?:     string
+    resolverAddress?:  string
     adminSecret?:      string
   }>()
 
@@ -420,6 +423,7 @@ adminRouter.post('/api/config', async (c) => {
     rpcUrl:           body.rpcUrl           || existing.rpcUrl,
     attestationIndex: body.attestationIndex || existing.attestationIndex,
     nodeRegistry:     body.nodeRegistry     || existing.nodeRegistry,
+    resolverAddress:  body.resolverAddress  || existing.resolverAddress,
   }
 
   try {
@@ -1447,6 +1451,15 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
         </div>
 
         <div class="config-section">
+          <div class="config-section-title">CCIP-Read resolver</div>
+          <div class="cfg-field">
+            <label class="cfg-label">OffchainResolver contract</label>
+            <input type="text" id="cfg-resolveraddr" placeholder="0x… (on-chain resolver contract address)" style="font-family:var(--mono);font-size:11px" oninput="markDirty()"/>
+            <div class="cfg-hint">The on-chain resolver that reverts with OffchainLookup pointing to this gateway. Shown in spec audit.</div>
+          </div>
+        </div>
+
+        <div class="config-section">
           <div class="config-section-title">Admin access</div>
           <div class="cfg-field">
             <label class="cfg-label">Admin secret</label>
@@ -2253,6 +2266,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('cfg-rpcurl').value       = d.rpcUrl          ?? ''
     document.getElementById('cfg-attestindex').value  = d.attestationIndex ?? ''
     document.getElementById('cfg-noderegistry').value = d.nodeRegistry    ?? ''
+    document.getElementById('cfg-resolveraddr').value = d.resolverAddress ?? ''
 
     autoDiscover = d.autoDiscover ?? true
     document.getElementById('toggle-autodiscover').className = 'toggle-switch' + (autoDiscover ? ' on' : '')
@@ -2294,6 +2308,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       rpcUrl:           document.getElementById('cfg-rpcurl').value.trim()        || undefined,
       attestationIndex: document.getElementById('cfg-attestindex').value.trim()   || undefined,
       nodeRegistry:     document.getElementById('cfg-noderegistry').value.trim()  || undefined,
+      resolverAddress:  document.getElementById('cfg-resolveraddr').value.trim()  || undefined,
       adminSecret:      document.getElementById('cfg-adminsecret').value.trim()   || undefined,
     }
     const res  = await fetch('/admin/api/config', {
