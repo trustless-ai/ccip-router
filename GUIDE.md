@@ -192,13 +192,21 @@ docker compose up --build
 
 ## Connect to the Sepolia contracts
 
-Both contracts are deployed and shared — no need to deploy your own.
+All ccip-router contracts are deployed and shared — no need to deploy your own.
 
-| Contract | Address |
-|---|---|
-| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) |
-| `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) |
-| `WyriweAttestationVerifier` | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) |
+| Contract | Address | Role |
+|---|---|---|
+| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | OCP-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
+| `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public node directory |
+| `WyriweAttestationVerifier` | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier` |
+
+**ERC-8263 canonical reference** (not ccip-router — referenced here for completeness):
+
+| Contract | Sepolia | Mainnet |
+|---|---|---|
+| `TruthAnchorV1` | [`0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C`](https://sepolia.etherscan.io/address/0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C) | [`0xe95d6a15966984c209a62a2c188828555eb5ec3d`](https://etherscan.io/address/0xe95d6a15966984c209a62a2c188828555eb5ec3d) |
+
+`AttestationIndex` is a valid OCP-compatible anchor but is distinct from `TruthAnchorV1` — the canonical ERC-8263 contract (Vincent Wu) that emits `AnchorProof` with `agentIdScheme`. The two are separate primitives by design.
 
 **Via admin panel:** Deploy contracts → select Sepolia → "Use these addresses →". Done.
 
