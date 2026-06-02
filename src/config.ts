@@ -27,6 +27,8 @@ export type Config = {
   // Decentralized CDN — optional, enables IPFS upload from admin panel
   cdnProvider:      'pinata' | 'storacha' | null
   cdnApiKey:        string | null
+  // Mesh messages — optional, marks messages from this address as official
+  networkKey:       string | null
 }
 
 export type ConfigFile = {
@@ -52,6 +54,7 @@ export type ConfigFile = {
   adminAddress?: string
   cdnProvider?: string
   cdnApiKey?: string
+  networkKey?: string
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -119,6 +122,7 @@ export function loadConfig(): Config {
     AUTO_DISCOVER:       process.env.AUTO_DISCOVER        ?? String(file.autoDiscover ?? 'true'),
     CDN_PROVIDER:        process.env.CDN_PROVIDER         ?? file.cdnProvider,
     CDN_API_KEY:         process.env.CDN_API_KEY          ?? file.cdnApiKey,
+    NETWORK_KEY:         process.env.NETWORK_KEY          ?? file.networkKey,
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -180,7 +184,8 @@ export function loadConfig(): Config {
   const cdnProvider = (rawCdnProvider === 'pinata' || rawCdnProvider === 'storacha')
     ? rawCdnProvider
     : null
-  const cdnApiKey = raw.CDN_API_KEY?.trim() || null
+  const cdnApiKey  = raw.CDN_API_KEY?.trim() || null
+  const networkKey = raw.NETWORK_KEY?.trim() || null
 
   if (cdnProvider) {
     console.log(`[config] cdn:       provider=${cdnProvider}`)
@@ -206,6 +211,7 @@ export function loadConfig(): Config {
     adminAddress,
     cdnProvider,
     cdnApiKey,
+    networkKey,
   }
 }
 

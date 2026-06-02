@@ -14,6 +14,8 @@ import { ocpRouter } from './verify/ocp.js'
 import { startSyncCron } from './mesh/cron.js'
 import { peersRouter } from './mesh/records.js'
 import { makeVni } from './mesh/vni.js'
+import { messagesRouter } from './mesh/messages.js'
+import { NODE_VERSION } from './version.js'
 import { setupRouter } from './ui/setup.js'
 import { adminRouter } from './ui/admin.js'
 import { staticRouter } from './ui/static.js'
@@ -110,6 +112,7 @@ const ccip = new CcipRouter({
 // Specific named routes must be registered before the CCIP wildcard /:sender/:data
 app.route('/records', recordsRouter)
 app.route('/peers', peersRouter)
+app.route('/messages', messagesRouter)
 app.route('/verify', verifyRouter)
 app.route('/ocp', ocpRouter)
 
@@ -144,7 +147,7 @@ app.get('/health', async (c) => {
   ])
   return c.json({
     ok:            true,
-    version:       '0.2.0',
+    version:       NODE_VERSION,
     namespace:     config.syncNamespace,
     signerAddress,
     nodeUrl:       config.nodeUrl ?? null,

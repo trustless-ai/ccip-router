@@ -1,5 +1,6 @@
 import { keccak256, toBytes, recoverMessageAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
+import { NODE_VERSION } from '../version.js'
 
 export type VniDocument = {
   nodeId:        `0x${string}`   // keccak256(signerAddress) — stable node identifier
@@ -20,7 +21,7 @@ function vniMessage(doc: VniDocument): string {
 export async function makeVni(
   gatewayKey: `0x${string}`,
   url: string,
-  version = '0.2.0',
+  version = NODE_VERSION,
 ): Promise<SignedVni> {
   const account   = privateKeyToAccount(gatewayKey)
   const timestamp = Math.floor(Date.now() / 1000)

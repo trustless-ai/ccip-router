@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { SCHEMA, MIGRATIONS } from './schema.js'
-import type { DB, MeshRecord, PeerState, Contribution, NameRecord } from './types.js'
+import type { DB, MeshRecord, PeerState, Contribution, NameRecord, Message, MessageType } from './types.js'
 
 type EnsRow = {
   name:        string
@@ -51,6 +51,11 @@ export class SQLiteDB implements DB {
     ensGet: Database.Statement
     ensList: Database.Statement
     ensListAll: Database.Statement
+    msgInsert:      Database.Statement
+    msgList:        Database.Statement
+    msgMarkRead:    Database.Statement
+    msgMarkAllRead: Database.Statement
+    msgUnreadCount: Database.Statement
   }
 
   constructor(path: string) {
@@ -166,6 +171,27 @@ export class SQLiteDB implements DB {
 
       ensListAll: this.db.prepare(`
         SELECT * FROM ens_records ORDER BY name ASC, type ASC, coin_type ASC, text_key ASC
+      `),
+
+      msgInsert: this.db.prepare(`
+        INSERT INTO messages (from_url, from_signer, type, body, version, signature, timestamp, official)
+        VALUES (@fromUrl, @fromSigner, @type, @body, @version, @signature, @timestamp, @official)
+      `),
+
+      msgList: this.db.prepare(`
+        SELECT * FROM messages ORDER BY received_at DESC LIMIT ?
+      `),
+
+      msgMarkRead: this.db.prepare(`
+        UPDATE messages SET read = 1 WHERE id = ?
+      `),
+
+      msgMarkAllRead: this.db.prepare(`
+        UPDATE messages SET read = 1 WHERE read = 0
+      `),
+
+      msgUnreadCount: this.db.prepare(`
+        SELECT COUNT(*) as count FROM messages WHERE read = 0
       `),
     }
   }
@@ -309,6 +335,38 @@ export class SQLiteDB implements DB {
     return rows.map(toNameRecord)
   }
 
+  async insertMessage(msg: Omit<Message, 'id' | 'receivedAt'>): Promise<number> {
+    const result = this.stmts.msgInsert.run({
+      fromUrl:    msg.fromUrl,
+      fromSigner: msg.fromSigner,
+      type:       msg.type,
+      body:       msg.body,
+      version:    msg.version,
+      signature:  msg.signature,
+      timestamp:  msg.timestamp,
+      official:   msg.official ? 1 : 0,
+    })
+    return result.lastInsertRowid as number
+  }
+
+  async getMessages(limit = 50): Promise<Message[]> {
+    const rows = this.stmts.msgList.all(limit) as MessageRow[]
+    return rows.map(toMessage)
+  }
+
+  async markMessagesRead(ids?: number[]): Promise<void> {
+    if (!ids || ids.length === 0) {
+      this.stmts.msgMarkAllRead.run()
+    } else {
+      for (const id of ids) this.stmts.msgMarkRead.run(id)
+    }
+  }
+
+  async unreadMessageCount(): Promise<number> {
+    const row = this.stmts.msgUnreadCount.get() as { count: number }
+    return row.count
+  }
+
   close(): void {
     this.db.close()
   }
@@ -333,6 +391,36 @@ function toPeerState(row: PeerRow): PeerState {
     healthy:       row.healthy === 1,
     nodeVersion:   row.node_version,
     signerAddress: row.signer_address,
+  }
+}
+
+type MessageRow = {
+  id:          number
+  from_url:    string
+  from_signer: string
+  type:        string
+  body:        string
+  version:     string
+  signature:   string
+  timestamp:   number
+  received_at: number
+  read:        number
+  official:    number
+}
+
+function toMessage(row: MessageRow): Message {
+  return {
+    id:         row.id,
+    fromUrl:    row.from_url,
+    fromSigner: row.from_signer,
+    type:       row.type as MessageType,
+    body:       row.body,
+    version:    row.version,
+    signature:  row.signature,
+    timestamp:  row.timestamp,
+    receivedAt: row.received_at,
+    read:       row.read === 1,
+    official:   row.official === 1,
   }
 }
 

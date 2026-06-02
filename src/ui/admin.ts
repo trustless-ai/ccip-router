@@ -13,6 +13,7 @@ import { registerNode } from '../chain/register.js'
 import { getCdnProvider } from '../cdn/index.js'
 import { namehash } from 'viem/ens'
 import { NODE_VERSION } from '../version.js'
+import { broadcastMessage } from '../mesh/messages.js'
 
 export const adminRouter = new Hono()
 
@@ -127,11 +128,12 @@ adminRouter.post('/siwe/transfer', async (c) => {
 adminRouter.get('/api/status', async (c) => {
   const config = getConfig()
   const db     = getDB()
-  const [peers, count, recent, wyriweCount] = await Promise.all([
+  const [peers, count, recent, wyriweCount, unreadMessages] = await Promise.all([
     db.getPeers(),
     db.recordCount(config.syncNamespace),
     db.getRecentRecords(config.syncNamespace, 8),
     db.recordCount(config.syncNamespace + ':wyriwe'),
+    db.unreadMessageCount(),
   ])
   const signerAddress = config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
   return c.json({
@@ -149,6 +151,7 @@ adminRouter.get('/api/status', async (c) => {
       vni:      !!(config.gatewayKey && config.nodeUrl),
       onChain:  !!(config.attestationIndex && config.rpcUrl),
     },
+    unreadMessages,
     peers: peers.map((p) => ({
       url: p.url, healthy: p.healthy,
       signerAddress: p.signerAddress, nodeVersion: p.nodeVersion, lastSyncAt: p.lastSyncAt,
@@ -514,6 +517,35 @@ adminRouter.post('/api/cdn/upload', async (c) => {
     return c.json({ cid, provider: provider.name })
   } catch (err) {
     return c.json({ error: String(err) }, 502)
+  }
+})
+
+// ── Messages API ──────────────────────────────────────────────────────────────
+
+adminRouter.get('/api/messages', async (c) => {
+  const limit = Math.min(Number(c.req.query('limit') ?? 50), 200)
+  const messages = await getDB().getMessages(limit)
+  return c.json({ messages })
+})
+
+adminRouter.post('/api/messages/read', async (c) => {
+  const body = await c.req.json<{ ids?: number[] }>().catch(() => ({ ids: undefined }))
+  await getDB().markMessagesRead(body.ids)
+  return c.json({ ok: true })
+})
+
+adminRouter.post('/api/messages/send', async (c) => {
+  const config = getConfig()
+  if (!config.gatewayKey) return c.json({ error: 'GATEWAY_PRIVATE_KEY required to send messages' }, 400)
+  const body = await c.req.json<{ type: string; message: string; version?: string }>()
+  if (!body.type || !body.message) return c.json({ error: 'type and message required' }, 400)
+  const validTypes = ['upgrade_notice', 'deprecation', 'network_announcement']
+  if (!validTypes.includes(body.type)) return c.json({ error: 'invalid type' }, 400)
+  try {
+    const result = await broadcastMessage(body.type as any, body.message, body.version)
+    return c.json(result)
+  } catch (err) {
+    return c.json({ error: String(err) }, 500)
   }
 })
 
@@ -1656,6 +1688,60 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="audit-panel" id="msg-panel" style="margin-top:16px">
+    <div class="audit-header" id="msg-header" onclick="toggleMsgPanel()">
+      <div class="panel-title">
+        Mesh messages
+        <span id="msg-badge" style="display:none;font-size:10px;background:#ef4444;color:#fff;padding:1px 6px;border-radius:10px;margin-left:6px">0</span>
+      </div>
+      <span class="audit-chevron" id="msg-chevron">▼</span>
+    </div>
+    <div id="msg-body" style="display:none">
+      <div class="config-form">
+
+        <div class="config-section">
+          <div class="config-section-title">Received messages</div>
+          <p style="font-size:13px;color:var(--subtle);margin:0 0 12px">
+            Signed notifications from mesh peers. Messages from the official network key are marked
+            <span style="font-size:10px;background:#7c3aed;color:#fff;padding:1px 5px;border-radius:3px">official</span>.
+          </p>
+          <div id="msg-list" style="font-size:12px;color:var(--subtle)">Loading…</div>
+          <div style="margin-top:10px;display:flex;gap:8px">
+            <button class="cfg-save-btn" onclick="markAllRead()" style="background:var(--s3)">Mark all read</button>
+          </div>
+        </div>
+
+        <div class="config-section">
+          <div class="config-section-title">Send message to all peers</div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">Type</label>
+              <select class="cfg-input" id="msg-type" style="width:100%">
+                <option value="upgrade_notice">upgrade_notice</option>
+                <option value="deprecation">deprecation</option>
+                <option value="network_announcement">network_announcement</option>
+              </select>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">Version (optional)</label>
+              <input class="cfg-input" type="text" id="msg-version" placeholder="e.g. 0.5.0"/>
+            </div>
+          </div>
+          <div class="cfg-field" style="margin-top:8px">
+            <label class="cfg-label">Message</label>
+            <input class="cfg-input" type="text" id="msg-body-input" placeholder="v0.5.0 is available — upgrade when convenient"/>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+            <button class="cfg-save-btn" onclick="sendMessage()" id="msg-send-btn">Sign &amp; broadcast</button>
+            <span id="msg-send-status" style="font-size:12px;color:var(--subtle)"></span>
+          </div>
+          <div class="cfg-hint">Signed with your gateway key. Only delivered to peers that know your signer address.</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
   <div class="audit-panel" id="deploy-panel" style="margin-top:16px">
     <div class="audit-header" id="deploy-header" onclick="toggleDeployPanel()">
       <div class="panel-title">Deploy contracts</div>
@@ -1854,6 +1940,16 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('ni-interval').textContent = d.syncInterval
     document.getElementById('ni-version').textContent  = d.version
     document.getElementById('node-bar').style.display  = 'flex'
+
+    // Unread messages badge
+    const badge = document.getElementById('msg-badge')
+    if (d.unreadMessages > 0) {
+      badge.textContent = String(d.unreadMessages)
+      badge.style.display = 'inline'
+    } else {
+      badge.style.display = 'none'
+    }
+    if (msgOpen) loadMessages()
 
     // Show warning banner if admin is open
     document.getElementById('warn-banner').style.display = d.protected ? 'none' : 'flex'
@@ -2315,6 +2411,98 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('ens-body').style.display    = ensOpen ? 'block' : 'none'
     document.getElementById('ens-chevron').textContent   = ensOpen ? '▲' : '▼'
     if (ensOpen) loadEnsRecords()
+  }
+
+  // ── Messages panel ──────────────────────────────────────────────────────────
+
+  let msgOpen = false
+
+  function toggleMsgPanel() {
+    msgOpen = !msgOpen
+    document.getElementById('msg-body').style.display  = msgOpen ? 'block' : 'none'
+    document.getElementById('msg-chevron').textContent = msgOpen ? '▲' : '▼'
+    if (msgOpen) loadMessages()
+  }
+
+  async function loadMessages() {
+    const list = document.getElementById('msg-list')
+    try {
+      const res  = await fetch('/admin/api/messages')
+      const data = await res.json()
+      if (!data.messages.length) {
+        list.innerHTML = '<div style="color:var(--muted);padding:8px 0">No messages yet.</div>'
+        return
+      }
+      const TYPE_COLORS = {
+        upgrade_notice: '#2563eb',
+        deprecation: '#dc2626',
+        network_announcement: '#059669',
+      }
+      list.innerHTML = data.messages.map(m => {
+        const badge   = m.official
+          ? '<span style="font-size:10px;background:#7c3aed;color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px">official</span>'
+          : ''
+        const typeBadge = \`<span style="font-size:10px;background:\${TYPE_COLORS[m.type] ?? '#666'};color:#fff;padding:1px 5px;border-radius:3px">\${m.type}</span>\`
+        const unread  = !m.read ? 'font-weight:600;' : 'opacity:0.7;'
+        return \`
+        <div style="\${unread}padding:10px 0;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start">
+          <div style="flex:1">
+            <div style="margin-bottom:4px">\${typeBadge}\${badge}
+              <span style="font-size:11px;color:var(--subtle);margin-left:6px">\${m.fromUrl} · \${rel(m.receivedAt)}</span>
+            </div>
+            <div style="font-size:13px">\${m.body}\${m.version ? ' <span style="color:var(--subtle)">v' + m.version + '</span>' : ''}</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="markRead(\${m.id})" title="Mark read" style="opacity:0.6;font-size:11px">✓</button>
+        </div>
+      \`}).join('')
+    } catch (err) {
+      list.textContent = 'Failed to load: ' + err.message
+    }
+  }
+
+  async function markRead(id) {
+    await fetch('/admin/api/messages/read', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: [id] }),
+    })
+    loadMessages()
+    loadStatus()
+  }
+
+  async function markAllRead() {
+    await fetch('/admin/api/messages/read', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    loadMessages()
+    loadStatus()
+  }
+
+  async function sendMessage() {
+    const type    = document.getElementById('msg-type').value
+    const body    = document.getElementById('msg-body-input').value.trim()
+    const version = document.getElementById('msg-version').value.trim()
+    const status  = document.getElementById('msg-send-status')
+    const btn     = document.getElementById('msg-send-btn')
+
+    if (!body) { status.textContent = 'Enter a message'; return }
+
+    btn.disabled = true
+    status.textContent = 'Broadcasting…'
+    try {
+      const res  = await fetch('/admin/api/messages/send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, message: body, version: version || undefined }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      status.textContent = \`✓ sent: \${data.sent}, failed: \${data.failed}\`
+      document.getElementById('msg-body-input').value = ''
+    } catch (err) {
+      status.textContent = '✕ ' + (err.message || String(err))
+    } finally {
+      btn.disabled = false
+    }
   }
 
   // ── IPFS panel ──────────────────────────────────────────────────────────────

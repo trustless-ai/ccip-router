@@ -25,6 +25,22 @@ export type Contribution = {
   count:      number
 }
 
+export type MessageType = 'upgrade_notice' | 'deprecation' | 'network_announcement'
+
+export type Message = {
+  id:          number
+  fromUrl:     string
+  fromSigner:  string
+  type:        MessageType
+  body:        string
+  version:     string
+  signature:   string
+  timestamp:   number
+  receivedAt:  number
+  read:        boolean
+  official:    boolean
+}
+
 export type NameRecord = {
   name:       string
   type:       'addr' | 'addr_coin' | 'text' | 'contenthash'
@@ -45,6 +61,11 @@ export interface DB {
   removePeer(url: string): Promise<void>
   getPeers(): Promise<PeerState[]>
   recordCount(namespace: string): Promise<number>
+  // Mesh messages — signed push notifications from peers
+  insertMessage(msg: Omit<Message, 'id' | 'receivedAt'>): Promise<number>
+  getMessages(limit?: number): Promise<Message[]>
+  markMessagesRead(ids?: number[]): Promise<void>
+  unreadMessageCount(): Promise<number>
   // ENS name records — admin-managed, served via withEns()
   upsertNameRecord(r: Omit<NameRecord, 'modifiedAt'>): Promise<void>
   deleteNameRecord(name: string, type: string, coinType: number, textKey: string): Promise<void>

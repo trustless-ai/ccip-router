@@ -52,4 +52,23 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       );
     `,
   },
+  {
+    version: 3,
+    sql: `
+      CREATE TABLE IF NOT EXISTS messages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_url    TEXT    NOT NULL,
+        from_signer TEXT    NOT NULL,
+        type        TEXT    NOT NULL,
+        body        TEXT    NOT NULL,
+        version     TEXT    NOT NULL DEFAULT '',
+        signature   TEXT    NOT NULL,
+        timestamp   INTEGER NOT NULL,
+        received_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        read        INTEGER NOT NULL DEFAULT 0,
+        official    INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_messages_read ON messages (read);
+    `,
+  },
 ]
