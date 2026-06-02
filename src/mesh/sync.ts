@@ -9,7 +9,7 @@ export async function syncAll(config: Config, db: DB): Promise<number> {
   const peers = await db.getPeers()
   const results = await Promise.allSettled(
     peers.map(async (peer) => {
-      const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl)
+      const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl ?? undefined)
       await db.upsertPeer({ ...peer, ...update })
     }),
   )
