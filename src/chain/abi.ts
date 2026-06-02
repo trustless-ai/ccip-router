@@ -56,6 +56,45 @@ export const ATTESTATION_INDEX_ABI = [
   },
 ] as const
 
+// ERC-8274 IProofVerifier — verify(inputHash, outputHash, metadata, proof)
+// WyriweProofVerifier deployed on Sepolia: 0x001eFFa0fD1D171b164808644678F3301d8EDC96
+export const WYRIWE_PROOF_VERIFIER_ABI = [
+  {
+    type: 'function',
+    name: 'verify',
+    inputs: [
+      { name: 'inputHash',  type: 'bytes32' },
+      { name: 'outputHash', type: 'bytes32' },
+      { name: 'metadata',   type: 'bytes' },
+      { name: 'proof',      type: 'bytes' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'name',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+    stateMutability: 'pure',
+  },
+  {
+    type: 'function',
+    name: 'version',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+    stateMutability: 'pure',
+  },
+  {
+    type: 'function',
+    name: 'proofProfile',
+    inputs: [],
+    outputs: [{ name: '', type: 'bytes32' }],
+    stateMutability: 'pure',
+  },
+] as const
+
+// @deprecated — ERC-8183 IAttestationVerifier. Use WYRIWE_PROOF_VERIFIER_ABI (ERC-8274) instead.
 export const WYRIWE_ATTESTATION_VERIFIER_ABI = [
   {
     type: 'function',
