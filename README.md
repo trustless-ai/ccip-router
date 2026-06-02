@@ -108,7 +108,7 @@ graph TB
     S["EIP-191 · Record signing\nkeccak256(inputHash · namespace · valueHash · ts)"]
     W["WYRIWE · Input provenance\nsentinel path: inputHash = rawInputHash\nnon-sentinel: inputHash = keccak256(abi.encode(raw, pipelineHash))"]
     I["ERC-8004 · Agent identity\nagentId · registryAddress declared on-chain"]
-    O["OCP / ERC-8263 · Observation commitment\ncommitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)"]
+    O["OCP / ERC-8263 · Observation commitment\ncommitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)\nproofHash in TruthAnchorV1 = commitmentHash"]
     A["EIP-712 · WyriweAttestation\nstructured signing · verifiable by any peer · synced by mesh"]
     V["VNI · Node identity\nEIP-191 signed { nodeId · signerAddress · url · version · ts }"]
     C["On-chain anchoring · Sepolia\nAttestationIndex — signerOf · commitmentOf\nNodeRegistry — register(url, sig)"]
@@ -136,6 +136,8 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 | `TruthAnchorV1` | [`0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C`](https://sepolia.etherscan.io/address/0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C) | [`0xe95d6a15966984c209a62a2c188828555eb5ec3d`](https://etherscan.io/address/0xe95d6a15966984c209a62a2c188828555eb5ec3d) |
 
 `TruthAnchorV1` emits the canonical `AnchorProof(uint8 agentIdScheme, bytes32 agentId, bytes32 proofHash, address operator, bytes aux)` event that OCP's ERC-8263 extraction rule is written against. `AttestationIndex` sits alongside it as the transport-layer commitment store — the two are separate primitives by design.
+
+**How ccip-router connects to ERC-8263:** `proofHash` in `TruthAnchorV1` = `commitmentHash` in the `WyriweAttestation` struct = `keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))`. The full chain: inference runs → gateway signs `WyriweAttestation` (producing `commitmentHash`) → `anchor(commitmentHash)` is called on `TruthAnchorV1` → `AnchorProof` event is emitted. To verify L3 anchoring, filter `AnchorProof` by the `proofHash` topic (= your `commitmentHash`) and compare the anchoring block's timestamp against your execution time. This is an `eth_getLogs` read — V1 is event-only by design (no per-anchor storage cost). A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
 
 Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.etherscan.io/address/0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14) · Solc 0.8.24 · optimizer 200 runs.
 

@@ -209,6 +209,8 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 
 `AttestationIndex` is a valid OCP-compatible anchor but is distinct from `TruthAnchorV1` — the canonical ERC-8263 contract (Vincent Wu) that emits `AnchorProof` with `agentIdScheme`. The two are separate primitives by design.
 
+**How ccip-router connects to ERC-8263:** `proofHash` in `TruthAnchorV1` = `commitmentHash` in `WyriweAttestation` = `keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))`. The full chain: gateway signs `WyriweAttestation` → `anchor(commitmentHash)` called on `TruthAnchorV1` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by `proofHash` topic (= your `commitmentHash`) via `eth_getLogs`. `TruthAnchorV1` V1 is event-only by design — no per-anchor storage. A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
+
 **Via admin panel:** Deploy contracts → select Sepolia → "Use these addresses →". Done.
 
 **Via env:**
