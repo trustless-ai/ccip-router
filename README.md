@@ -126,7 +126,8 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 |---|---|---|
 | `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | ccip-router's OCP-compatible commitment store. Stores `signerOf[commitmentHash]` and `commitmentOf[inputHash]`. Valid OCP anchor — distinct from the ERC-8263 canonical contract. |
 | `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public directory of nodes. `register(url, sig)` proves key ownership via EIP-191 — the relayer (`msg.sender`) does not need to be the signing key. |
-| `WyriweAttestationVerifier` | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier` implementation. `verify(commitmentHash, abi.encode(WyriweAttestation, sig))` — recovers signer, recomputes OCP commitment, returns bool. No external calls. |
+| `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96) | ERC-8274 `IProofVerifier` implementation. `verify(inputHash, outputHash, abi.encode(agentId, registry), abi.encode(modelHash, rawInputHash, sanitizationPipelineHash, commitmentHash, timestamp, sig))` — recomputes OCP commitment, recovers signer, returns bool. No external calls. |
+| `WyriweAttestationVerifier` *(deprecated)* | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier`. Superseded by `WyriweProofVerifier`. |
 
 **ERC-8263 canonical reference contract** (Vincent Wu, not ccip-router):
 
@@ -142,7 +143,7 @@ Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.ether
 
 **To deploy to another chain:** open the admin panel → Deploy contracts → select the chain → connect wallet → three transactions (one per contract). No private key is stored — MetaMask signs everything in-browser.
 
-Source: [`contracts/AttestationIndex.sol`](contracts/AttestationIndex.sol) · [`contracts/NodeRegistry.sol`](contracts/NodeRegistry.sol) · [`contracts/WyriweAttestationVerifier.sol`](contracts/WyriweAttestationVerifier.sol)
+Source: [`contracts/AttestationIndex.sol`](contracts/AttestationIndex.sol) · [`contracts/NodeRegistry.sol`](contracts/NodeRegistry.sol) · [`contracts/IProofVerifier.sol`](contracts/IProofVerifier.sol) · [`contracts/WyriweProofVerifier.sol`](contracts/WyriweProofVerifier.sol)
 
 ---
 
