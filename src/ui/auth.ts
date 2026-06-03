@@ -28,7 +28,8 @@ export function requireAdmin(
       path.endsWith('/login')       ||
       path.endsWith('/logout')      ||
       path.endsWith('/siwe/nonce')  ||
-      path.endsWith('/siwe/verify')
+      path.endsWith('/siwe/verify') ||
+      path.endsWith('/siwe/reset')
     ) return next()
 
     // SIWE session check

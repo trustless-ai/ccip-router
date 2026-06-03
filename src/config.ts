@@ -251,3 +251,15 @@ export function setAdminAddress(address: string): void {
   writeFileSync(CONFIG_FILE_PATH, JSON.stringify({ ...existing, adminAddress: address }, null, 2), 'utf8')
   console.log(`[config] adminAddress set to ${address}`)
 }
+
+// Clear adminAddress — returns node to unclaimed state.
+export function clearAdminAddress(): void {
+  if (_config) _config.adminAddress = null
+  let existing: ConfigFile = {}
+  if (existsSync(CONFIG_FILE_PATH)) {
+    try { existing = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8')) as ConfigFile } catch {}
+  }
+  const { adminAddress: _removed, ...rest } = existing
+  writeFileSync(CONFIG_FILE_PATH, JSON.stringify(rest, null, 2), 'utf8')
+  console.log('[config] adminAddress cleared — node returned to unclaimed state')
+}

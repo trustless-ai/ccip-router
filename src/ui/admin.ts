@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { writeFileSync, existsSync, readFileSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { privateKeyToAccount } from 'viem/accounts'
-import { getConfig, setAdminAddress, CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
+import { getConfig, setAdminAddress, clearAdminAddress, CONFIG_FILE_PATH, type ConfigFile } from '../config.js'
 import { getDB } from '../db/index.js'
 import { syncAll } from '../mesh/sync.js'
 import { getLogs } from '../log.js'
@@ -95,6 +95,24 @@ adminRouter.post('/siwe/verify', async (c) => {
 adminRouter.post('/logout', (c) => {
   clearAdminSession(c)
   return c.redirect('/admin/login')
+})
+
+// Reset admin: requires ADMIN_SECRET in body — clears adminAddress back to unclaimed.
+// Accessible without a session so a locked-out operator can recover without SSH.
+adminRouter.post('/siwe/reset', async (c) => {
+  const config = getConfig()
+  if (!config.adminSecret) {
+    return c.json({
+      error: 'No ADMIN_SECRET configured. To recover, SSH to the node and remove adminAddress from config.json.',
+    }, 403)
+  }
+  const body = await c.req.json<{ secret?: string }>().catch(() => ({ secret: undefined }))
+  if (!body.secret || body.secret !== config.adminSecret) {
+    return c.json({ error: 'invalid secret' }, 401)
+  }
+  clearAdminAddress()
+  clearAdminSession(c)
+  return c.json({ ok: true, message: 'Admin cleared — node returned to unclaimed state. Sign in with the correct wallet.' })
 })
 
 // Transfer admin: current session holder proves new wallet ownership via SIWE, then admin moves.
@@ -715,6 +733,10 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
   <div class="authorized-addr" id="auth-addr" style="display:none">
     <span class="dot"></span>
     <span id="auth-addr-text">loading...</span>
+    <button onclick="copyAuthorized()" title="Copy address"
+      style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--subtle);padding:0;line-height:1">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6zM0 6a2 2 0 0 1 2-2h2v1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2h1v2a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V6z"/></svg>
+    </button>
   </div>
 
   <button class="btn-siwe" id="btn" onclick="siweLogin()">
@@ -727,6 +749,20 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
 
   <div class="msg error" id="err"></div>
   <div class="msg info"  id="info"></div>
+
+  <!-- Recovery: shown only after a wrong-wallet error -->
+  <div id="recovery-section" style="display:none;margin-top:20px;border-top:1px solid var(--border);padding-top:18px">
+    <p class="cli-note" style="margin-bottom:10px;color:var(--subtle)">Lost access to that wallet?<br>Reset admin with your <code>ADMIN_SECRET</code></p>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <input id="secret-input" type="password" placeholder="ADMIN_SECRET"
+        style="flex:1;background:var(--s2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:12px;color:var(--text);font-family:var(--mono);outline:none"/>
+      <button onclick="resetAdmin()"
+        style="background:var(--red);color:#fff;border:none;border-radius:8px;padding:9px 14px;font-size:12px;cursor:pointer;font-family:inherit;font-weight:500;white-space:nowrap">
+        Reset admin
+      </button>
+    </div>
+    <div class="msg error" id="reset-err" style="margin-top:10px"></div>
+  </div>
 </div>
 
 <script>
@@ -748,7 +784,8 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
         const el  = document.getElementById('auth-addr')
         const txt = document.getElementById('auth-addr-text')
         el.style.display = 'flex'
-        txt.textContent = 'Authorized: ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4)
+        txt.textContent = authorizedAddress.slice(0,10) + '...' + authorizedAddress.slice(-6)
+        el.title = authorizedAddress
         document.getElementById('btn').innerHTML = ethIconHTML() + ' Connect wallet'
       }
     } catch {}
@@ -773,8 +810,8 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
 
       // Normal mode: enforce address match
       if (isClaimed && authorizedAddress && address.toLowerCase() !== authorizedAddress.toLowerCase()) {
-        showError('Wrong wallet. Expected ' + authorizedAddress.slice(0,6) + '...' + authorizedAddress.slice(-4))
-        btn.disabled = false; btn.innerHTML = ethIconHTML() + (isClaimed ? ' Connect wallet' : ' Claim admin')
+        showWrongWalletError(address, authorizedAddress)
+        btn.disabled = false; btn.innerHTML = ethIconHTML() + ' Connect wallet'
         return
       }
 
@@ -836,6 +873,50 @@ const LOGIN_HTML = /* html */`<!DOCTYPE html>
     const el = document.getElementById('err')
     el.textContent = msg
     el.style.display = 'block'
+  }
+
+  function showWrongWalletError(got, expected) {
+    const short = expected.slice(0,10) + '...' + expected.slice(-6)
+    const el = document.getElementById('err')
+    el.innerHTML = 'Wrong wallet connected.<br>' +
+      '<span style="font-family:var(--mono);font-size:10px;opacity:.8">Need: ' + short + '</span><br>' +
+      '<span style="opacity:.7;margin-top:2px;display:inline-block">Switch to the correct wallet in MetaMask and try again.</span>'
+    el.style.display = 'block'
+    document.getElementById('recovery-section').style.display = 'block'
+  }
+
+  function copyAuthorized() {
+    if (!authorizedAddress) return
+    navigator.clipboard.writeText(authorizedAddress).then(() => {
+      const el = document.getElementById('auth-addr-text')
+      const prev = el.textContent
+      el.textContent = 'Copied!'
+      setTimeout(() => { el.textContent = prev }, 1500)
+    })
+  }
+
+  async function resetAdmin() {
+    const secret = document.getElementById('secret-input').value.trim()
+    if (!secret) return
+    const errEl = document.getElementById('reset-err')
+    errEl.style.display = 'none'
+    try {
+      const res = await fetch('/admin/siwe/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        window.location.reload()
+      } else {
+        errEl.textContent = data.error || 'Reset failed'
+        errEl.style.display = 'block'
+      }
+    } catch (e) {
+      errEl.textContent = String(e.message || e)
+      errEl.style.display = 'block'
+    }
   }
 
   function ethIconHTML() {
