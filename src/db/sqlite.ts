@@ -144,12 +144,15 @@ export class SQLiteDB implements DB {
         GROUP BY source_peer ORDER BY count DESC
       `),
 
-      // double-sign: same (input_hash, namespace), different signature — slashable
+      // double-sign: same signer submitted the same (input_hash, namespace) with a different
+      // signature — slashable equivocation. Different signers attesting the same input is
+      // normal multi-node mesh behaviour and must NOT be flagged.
       doubleSigns: this.db.prepare(`
         SELECT input_hash FROM records
-        WHERE input_hash = @inputHash
-          AND namespace  = @namespace
-          AND signature != @signature
+        WHERE input_hash  = @inputHash
+          AND namespace   = @namespace
+          AND source_peer = @sourcePeer
+          AND signature  != @signature
       `),
 
       ensUpsert: this.db.prepare(`
@@ -220,12 +223,13 @@ export class SQLiteDB implements DB {
 
   async insertRecord(record: MeshRecord): Promise<void> {
     const existing = this.stmts.doubleSigns.get({
-      inputHash: record.inputHash,
-      namespace: record.namespace,
-      signature: record.signature,
+      inputHash:  record.inputHash,
+      namespace:  record.namespace,
+      sourcePeer: record.sourcePeer,
+      signature:  record.signature,
     })
     if (existing) {
-      console.warn(`[double-sign] input_hash=${record.inputHash} ns=${record.namespace} — flagged for future slashing`)
+      console.warn(`[double-sign] input_hash=${record.inputHash} ns=${record.namespace} signer=${record.sourcePeer} — flagged for future slashing`)
     }
 
     this.stmts.insert.run({
