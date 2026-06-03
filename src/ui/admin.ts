@@ -1026,7 +1026,6 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     }
     .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); flex-shrink: 0; }
     .pill .addr { font-family: var(--mono); color: var(--text); }
-    .pill.ns { background: var(--accent-l); border-color: var(--accent-b); color: var(--indigo); }
     .pill.copyable { cursor: pointer; }
     .pill.copyable:hover { border-color: var(--border-h); }
     .pill.copied { background: var(--green-l); border-color: var(--green-b); }
@@ -1383,7 +1382,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     <div class="pill copyable" id="signer-pill" onclick="copySigner()" title="Click to copy address">
       <div class="dot"></div><span class="addr" id="h-addr">—</span>
     </div>
-    <div class="pill ns" id="h-ns">—</div>
+    <div class="pill" id="h-role" style="font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase">—</div>
     <button class="btn btn-primary btn-sm" id="btn-sync" onclick="syncNow()">⟳ Sync</button>
     <button class="btn btn-ghost btn-sm" id="btn-logout" style="display:none" onclick="logout()">Sign out</button>
   </div>
@@ -2218,7 +2217,12 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
     _signerAddress = d.signerAddress
     document.getElementById('h-addr').textContent = d.signerAddress ? trunc(d.signerAddress, 20) : 'dry-run'
-    document.getElementById('h-ns').textContent   = d.namespace
+    const roleInfo = peerRole(d.version)
+    const roleEl   = document.getElementById('h-role')
+    roleEl.textContent         = roleInfo.label
+    roleEl.style.background    = roleInfo.bg
+    roleEl.style.color         = roleInfo.color
+    roleEl.style.borderColor   = roleInfo.color + '44'
 
     // Dry-run banner
     document.getElementById('dryrun-banner').style.display = d.signerAddress ? 'none' : 'flex'
