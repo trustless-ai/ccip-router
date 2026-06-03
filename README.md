@@ -289,17 +289,31 @@ Both modes use the same Docker image and npm package. The difference is configur
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/template/ccip-router)
 
+### Node roles in the mesh
+
+The `/health` endpoint and admin peers panel report a `role` field for every node in the mesh:
+
+| Role | Badge | Detection | Description |
+|---|---|---|---|
+| **router** | 🔵 blue | `nodeVersion` matches semver (`\d+\.\d+`) | Full ccip-router node — peer sync, admin dashboard, attestation pipeline |
+| **gateway** | 🟣 purple | `nodeVersion` is non-semver (e.g. `"ens-boiler"`) | Third-party gateway implementing `GET /records` — participates in mesh sync without running ccip-router |
+| **unknown** | ⬛ grey | `nodeVersion` is null | Version not yet discovered — role resolved on next sync tick |
+
+Any CCIP-Read gateway that exposes `GET /records` in the mesh protocol format becomes a **gateway** peer. Router nodes pull its records exactly as they pull from other router nodes — fully heterogeneous mesh.
+
 ---
 
 ## Live network (dinamic.eth)
 
-Three production nodes running ccip-router `v0.5.7`, serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014):
+Three production nodes serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014), forming a **bidirectional heterogeneous mesh**:
 
-| Node | URL | Signer | Tiers |
-|---|---|---|---|
-| ENS Boiler (primary) | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, erc8004, wyriwe, ocp, vni, onChain |
-| NAS node | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, ocp, vni, onChain |
-| Railway node | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+| Node | Role | URL | Signer | Tiers |
+|---|---|---|---|---|
+| ENS Boiler (primary) | 🟣 gateway | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+| NAS node | 🔵 router | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+| Railway node | 🔵 router | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+
+ENS Boiler runs [ens-dynamic-kit](https://github.com/Echo-Merlini/ens-dynamic-kit) — a separate gateway stack. It participates in the mesh as a **gateway** peer: it exposes `GET /records` in the ccip-router mesh protocol, so router nodes pull its attestation records on every sync tick. All three nodes sync bidirectionally — records originating on any node propagate to all others within one sync interval.
 
 All three signers are authorized on the mainnet resolver. ENS clients try URLs in order — any live node produces a verifiable response.
 
@@ -525,12 +539,16 @@ GET /contributions
 ```
 GET /health
 → {
-    ok, version, namespace, signerAddress,
+    ok, version, role: "router",
+    namespace, signerAddress,
     identity: { agentId, registryAddress, chainId } | null,
-    tiers: { signed, erc8004, wyriwe, ocp },
-    peers, records
+    tiers: { signed, erc8004, wyriwe, ocp, vni, onChain },
+    peers: [{ url, healthy, nodeVersion, role, signerAddress, lastSyncAt }],
+    records, ensRecords
   }
 ```
+
+`role` is `"router"` for ccip-router nodes. Gateway peers report the role derived from their `nodeVersion` field: semver → `"router"`, non-semver → `"gateway"`, unknown → `"unknown"`.
 
 ### Admin auth (SIWE + Bearer)
 ```
@@ -569,20 +587,24 @@ POST /admin/api/register        register node on-chain via NodeRegistry
 
 ## Mesh sync protocol
 
-Any CCIP-Read gateway implementing `/records` is mesh-compatible:
+Any CCIP-Read gateway implementing `/records` is mesh-compatible — ccip-router nodes pull from it exactly as they pull from other router nodes:
 
 ```
 GET /records?since=<unix>&namespace=<string>&limit=<n>&cursor=<string>
 → { protocol: 1, node_version, namespace, records: [...], cursor: string | null }
 ```
 
+Each record must be signed: `signature = signMessage({ raw: keccak256(encodePacked([bytes32, string, bytes32, uint64], [inputHash, namespace, keccak256(value), timestamp])) })`. The receiving node recovers the signer and pins it — subsequent records from the same peer must match the same key.
+
 Protocol version `1` is the current stable spec. Nodes on a different version are skipped during sync with a warning.
 
 **Namespaces** are application-defined and scoped at the record level:
-- `agent-attestations` — ENS Boiler / ERC-8004 agents
+- `agent-attestations` — base CCIP-Read response records
 - `agent-attestations:wyriwe` — WYRIWE EIP-712 attestations (auto-produced by `withWyriwe()`)
 - `token-metadata` — NFT gateways
 - anything — define your own
+
+**Economic attribution (`/contributions`):** every record carries a `sourcePeer` field. `GET /contributions` returns per-peer record counts for a namespace — the on-mesh accounting layer for usage-based incentive models. This is the substrate for a transactional compensation layer between nodes: operators whose records are consumed by peers can be rewarded proportionally via an escrow smart contract keyed to contribution counts.
 
 ---
 
@@ -596,7 +618,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 | OCP / ERC-8263 | L3 Observation | Observation commitment hash. `AttestationIndex` = OCP-compatible anchor. Canonical ERC-8263 reference: `TruthAnchorV1` (Vincent Wu). | ✅ implemented |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
 | VNI | L5 Node Identity | Signed node identity, peer gossip | ✅ implemented |
-| ERC-8275 | L6 Economics | Contribution attribution (MVP) | ✅ implemented |
+| ERC-8275 | L6 Economics | Contribution attribution (`/contributions` — per-peer record counts, foundation for usage-based node compensation) | ✅ implemented |
 
 ---
 
@@ -673,6 +695,10 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] WyriweProofVerifier deployed to Ethereum mainnet (`0xd8a09d830b27697e1b24e8c9800e562d20318a09`) — ERC-8274 `IProofVerifier` parity with Sepolia
 - [x] `KNOWN_DEPLOYMENTS` in admin panel includes Ethereum mainnet — one-click canonical contract setup for operators
 - [x] All 3 mesh nodes registered in mainnet NodeRegistry with correct EIP-191 signing (relay pattern — no ETH required in hot key)
+- [x] ROUTER / GATEWAY / UNKNOWN role badges in admin peers panel — derived from `nodeVersion` (semver → router, non-semver → gateway)
+- [x] `/health` `role` field at node level and per-peer — exposes mesh topology to any client
+- [x] `GET /records` on ENS Boiler (ens-dynamic-kit) — gateway nodes now participate bidirectionally; router nodes pull attestation records from gateway peers on every sync tick
+- [x] Heterogeneous mesh — any stack implementing the `/records` protocol joins the mesh regardless of language or runtime
 
 ---
 
