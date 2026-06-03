@@ -21,7 +21,7 @@ export function startSyncCron(config: Config, db: DB): void {
 
     await Promise.allSettled(
       peers.map(async (peer) => {
-        const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover)
+        const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl ?? undefined)
         await db.upsertPeer({ ...peer, ...update })
       }),
     )

@@ -37,6 +37,7 @@ async function pullNamespace(
   peer: PeerState,
   namespace: string,
   db: DB,
+  meshSigners: Set<string>,
 ): Promise<{ inserted: number; rejected: number; signer: string | null; unsupported: boolean }> {
   let cursor: string | undefined = undefined
   let inserted = 0
@@ -52,7 +53,7 @@ async function pullNamespace(
     }
 
     for (const record of body.records) {
-      const result = await validateAndInsert(record, db, peer.signerAddress)
+      const result = await validateAndInsert(record, db, peer.signerAddress, meshSigners)
       if (result.inserted) {
         inserted++
         if (result.signer && !signer) signer = result.signer
@@ -78,9 +79,17 @@ export async function syncPeer(
 ): Promise<Partial<PeerState>> {
   let discoveredSigner: string | null = null
 
+  // Build the set of all known mesh signers once per sync cycle.
+  // Records relayed through a peer may carry any registered node's signature —
+  // accepting only peerSigner would reject legitimate relayed records.
+  const allPeers = await db.getPeers()
+  const meshSigners = new Set(
+    allPeers.flatMap((p) => (p.signerAddress ? [p.signerAddress.toLowerCase()] : []))
+  )
+
   try {
     // Sync base namespace
-    const base = await pullNamespace(peer, namespace, db)
+    const base = await pullNamespace(peer, namespace, db, meshSigners)
     if (base.unsupported) {
       console.warn(`[sync] ${peer.url} speaks unsupported protocol — skipping`)
       return { healthy: false }
@@ -88,7 +97,7 @@ export async function syncPeer(
     if (base.signer) discoveredSigner = base.signer
 
     // Sync wyriwe sub-namespace — best-effort, never fails the peer
-    const wyriwe = await pullNamespace(peer, namespace + ':wyriwe', db).catch(() => ({ inserted: 0, rejected: 0, signer: null, unsupported: false }))
+    const wyriwe = await pullNamespace(peer, namespace + ':wyriwe', db, meshSigners).catch(() => ({ inserted: 0, rejected: 0, signer: null, unsupported: false }))
     if (wyriwe.signer && !discoveredSigner) discoveredSigner = wyriwe.signer
 
     const inserted = base.inserted + wyriwe.inserted
@@ -129,13 +138,16 @@ export async function syncPeer(
 }
 
 // Validate a single record's signature then insert.
-// Signer pinning: if the peer's signer address is already known, reject any
-// record signed by a different key — prevents a compromised peer from injecting
-// records on behalf of another node.
+// Signer pinning: if the peer's own signer is known, records from that signer are
+// unconditionally accepted. Records signed by a different key are accepted if the
+// signer belongs to any known mesh peer — this handles relayed records that a router
+// pulls from its DB and re-serves with the original signer intact. Records from an
+// unknown signer are rejected.
 async function validateAndInsert(
   record: MeshRecord,
   db: DB,
-  knownSigner: string | null,
+  peerSigner: string | null,
+  meshSigners: Set<string>,
 ): Promise<{ inserted: boolean; signer: string | null }> {
   if (record.signature === '0x') {
     console.warn(`[sync] unsigned record ${record.inputHash} — accepted (dry-run peer)`)
@@ -151,12 +163,15 @@ async function validateAndInsert(
     return { inserted: false, signer: null }
   }
 
-  if (knownSigner && signer.toLowerCase() !== knownSigner.toLowerCase()) {
-    console.warn(
-      `[sync] signer mismatch on ${record.inputHash}: ` +
-      `expected ${knownSigner.slice(0, 10)}… got ${signer.slice(0, 10)}… — rejected`,
-    )
-    return { inserted: false, signer: null }
+  if (peerSigner && signer.toLowerCase() !== peerSigner.toLowerCase()) {
+    // Not from this peer directly — accept if it's from any known mesh member (relayed record)
+    if (!meshSigners.has(signer.toLowerCase())) {
+      console.warn(
+        `[sync] signer mismatch on ${record.inputHash}: ` +
+        `expected ${peerSigner.slice(0, 10)}… got ${signer.slice(0, 10)}… — rejected (unknown signer)`,
+      )
+      return { inserted: false, signer: null }
+    }
   }
 
   await db.insertRecord(record)
@@ -207,6 +222,17 @@ async function fetchPeerHealth(baseUrl: string): Promise<HealthResponse | null> 
   }
 }
 
+// Normalise a URL to a lowercase origin+path for self-URL comparison.
+// Strips trailing slash and lowercases everything — tolerates http vs https drift.
+function normalizeUrlForCompare(url: string): string {
+  try {
+    const u = new URL(url)
+    return (u.protocol + '//' + u.hostname + (u.port ? ':' + u.port : '') + u.pathname).toLowerCase().replace(/\/$/, '')
+  } catch {
+    return url.toLowerCase().replace(/\/$/, '')
+  }
+}
+
 // Fetch the peer's /peers list and add any newly discovered nodes to our DB.
 // Bounded to 10 new peers per sync cycle — prevents runaway growth.
 async function discoverPeers(peer: PeerState, db: DB, nodeUrl?: string): Promise<void> {
@@ -218,16 +244,19 @@ async function discoverPeers(peer: PeerState, db: DB, nodeUrl?: string): Promise
     const data = await res.json() as { peers?: { url: string; signerAddress: string | null }[] }
     if (!data.peers?.length) return
 
-    const existing = new Set((await db.getPeers()).map((p) => p.url))
+    const existing = new Set((await db.getPeers()).map((p) => normalizeUrlForCompare(p.url)))
     let added = 0
-    const selfUrl = nodeUrl?.replace(/\/$/, '') ?? ''
+    const selfNorm = nodeUrl ? normalizeUrlForCompare(nodeUrl) : ''
     for (const discovered of data.peers) {
       if (added >= 10) break
-      if (!discovered.url || existing.has(discovered.url)) continue
+      if (!discovered.url) continue
       try { new URL(discovered.url) } catch { continue }
+      const norm = normalizeUrlForCompare(discovered.url)
+      if (selfNorm && norm === selfNorm) continue  // never add self as peer
+      if (existing.has(norm)) continue
       const url = discovered.url.replace(/\/$/, '')
-      if (selfUrl && url === selfUrl) continue  // never add self as peer
       await db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: discovered.signerAddress })
+      existing.add(norm)  // prevent double-add within same cycle
       added++
     }
     if (added > 0) console.log(`[sync] discovered ${added} new peer(s) from ${peer.url}`)
