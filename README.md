@@ -147,8 +147,9 @@ Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.ether
 |---|---|
 | `NodeRegistry` | [`0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D) |
 | `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) |
+| `WyriweProofVerifier` | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) |
 
-Gateway nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their gateway key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Two dinamic.eth mesh nodes are registered: NAS (`0x58766f90...`) and Railway (`0x2048eADf...`).
+Gateway nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their gateway key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Three dinamic.eth mesh nodes are registered: NAS (`0x58766f90...`), Railway (`0x2048eADf...`), and ENS Boiler (`0x85Fa1351...`).
 
 Set `NODE_REGISTRY=0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D` on any mainnet node to enable on-chain registration via `POST /admin/api/register`.
 
@@ -174,7 +175,7 @@ EIP-3668 wildcard resolver with multi-signer support. Replaces the single `signe
 
 Source: [`contracts/OffchainResolver.sol`](contracts/OffchainResolver.sol)
 
-**To use on Sepolia:** open the admin panel → Deploy contracts → select Sepolia → "Use these addresses →". Addresses are saved to config automatically, no deployment needed.
+**To use on Mainnet or Sepolia:** open the admin panel → Deploy contracts → select the chain → "Use these addresses →". Canonical addresses are saved to config automatically, no deployment needed.
 
 **To deploy to another chain:** open the admin panel → Deploy contracts → select the chain → connect wallet → three transactions (one per contract). No private key is stored — MetaMask signs everything in-browser.
 
@@ -292,17 +293,17 @@ Both modes use the same Docker image and npm package. The difference is configur
 
 ## Live network (dinamic.eth)
 
-Three production nodes running ccip-router `v0.5.5`, serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014):
+Three production nodes running ccip-router `v0.5.7`, serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014):
 
 | Node | URL | Signer | Tiers |
 |---|---|---|---|
-| ENS Boiler (primary) | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, wyriwe, ocp |
-| NAS node | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, ocp, vni |
-| Railway node | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, vni |
+| ENS Boiler (primary) | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+| NAS node | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+| Railway node | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, erc8004, wyriwe, ocp, vni, onChain |
 
 All three signers are authorized on the mainnet resolver. ENS clients try URLs in order — any live node produces a verifiable response.
 
-NAS and Railway nodes are registered in the mainnet [`NodeRegistry`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D). The NAS node's ERC-8004 identity uses its signer address as `agentId` in the NodeRegistry — infrastructure identity, not a user-level NFT agent.
+All three nodes are registered in the mainnet [`NodeRegistry`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D). Each node's ERC-8004 identity uses its signer address as `agentId` — infrastructure identity, not a user-level NFT agent.
 
 ---
 
@@ -669,6 +670,9 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Live 3-node mesh — ENS Boiler + NAS ccip-router + Railway ccip-router all authorized signers; any node can serve a verifiable CCIP-Read response
 - [x] ENS Boiler dual-write sync — every admin record upsert also pushes to ccip-router via `ccipRouterSync.ts`
 - [x] `RESOLVER_ADDRESS` config field — shown in spec audit panel
+- [x] WyriweProofVerifier deployed to Ethereum mainnet (`0xd8a09d830b27697e1b24e8c9800e562d20318a09`) — ERC-8274 `IProofVerifier` parity with Sepolia
+- [x] `KNOWN_DEPLOYMENTS` in admin panel includes Ethereum mainnet — one-click canonical contract setup for operators
+- [x] All 3 mesh nodes registered in mainnet NodeRegistry with correct EIP-191 signing (relay pattern — no ETH required in hot key)
 
 ---
 
