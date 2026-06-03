@@ -128,10 +128,9 @@ adminRouter.post('/siwe/transfer', async (c) => {
 adminRouter.get('/api/status', async (c) => {
   const config = getConfig()
   const db     = getDB()
-  const [peers, count, recent, wyriweCount, unreadMessages] = await Promise.all([
+  const [peers, count, wyriweCount, unreadMessages] = await Promise.all([
     db.getPeers(),
     db.recordCount(config.syncNamespace),
-    db.getRecentRecords(config.syncNamespace, 8),
     db.recordCount(config.syncNamespace + ':wyriwe'),
     db.unreadMessageCount(),
   ])
@@ -156,12 +155,25 @@ adminRouter.get('/api/status', async (c) => {
       url: p.url, healthy: p.healthy,
       signerAddress: p.signerAddress, nodeVersion: p.nodeVersion, lastSyncAt: p.lastSyncAt,
     })),
-    recent: recent.map((r) => ({ inputHash: r.inputHash, timestamp: r.timestamp, sourcePeer: r.sourcePeer })),
   })
 })
 
 adminRouter.get('/api/logs', (c) => {
   return c.json(getLogs())
+})
+
+adminRouter.get('/api/records', async (c) => {
+  const config = getConfig()
+  const db     = getDB()
+  const limit  = Math.min(Number(c.req.query('limit') ?? 20), 100)
+  const offset = Math.max(Number(c.req.query('offset') ?? 0), 0)
+  const rows   = await db.getRecentRecords(config.syncNamespace, limit + offset)
+  const page   = rows.slice(offset, offset + limit)
+  return c.json({
+    records: page.map((r) => ({ inputHash: r.inputHash, timestamp: r.timestamp, sourcePeer: r.sourcePeer, namespace: r.namespace })),
+    hasMore: offset + limit < rows.length,
+    total:   rows.length,
+  })
 })
 
 adminRouter.get('/api/audit', async (c) => {
@@ -1013,6 +1025,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     }
     .record-row:last-child { border-bottom: none; }
     .record-row:hover { background: rgba(255,255,255,0.02); }
+    #records-list { max-height: 420px; overflow-y: auto; }
 
     .record-hash   { font-family: var(--mono); color: var(--indigo); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
     .record-source { font-size: 10px; flex-shrink: 0; padding: 2px 7px; border-radius: 5px; }
@@ -1913,19 +1926,62 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     return (ap ?? 0) < (bp ?? 0)
   }
 
-  function renderRecords(records) {
-    const el = document.getElementById('records-list')
-    if (!records.length) {
-      el.innerHTML = '<div class="empty">No records yet.<br>Call the CCIP handler to write one.</div>'
-      return
+  // ── Records infinite scroll ──────────────────────────────────────────────────
+  let _recordsOffset = 0
+  let _recordsLoading = false
+  let _recordsExhausted = false
+  let _recordsObserver = null
+
+  function recordRow(r) {
+    const src = r.sourcePeer ? r.sourcePeer.replace(/^https?:\/\//, '').replace(/\/.*/,'') : null
+    return \`<div class="record-row">
+      <div class="record-hash">\${r.inputHash}</div>
+      <div class="record-source \${src ? 'peer' : 'local'}">\${src ? '↓ ' + src : '● local'}</div>
+      <div class="record-time">\${rel(r.timestamp)}</div>
+    </div>\`
+  }
+
+  async function loadMoreRecords() {
+    if (_recordsLoading || _recordsExhausted) return
+    _recordsLoading = true
+    const sentinel = document.getElementById('records-sentinel')
+    if (sentinel) sentinel.textContent = 'Loading…'
+    try {
+      const res = await fetch(\`/admin/api/records?limit=20&offset=\${_recordsOffset}\`)
+      const d = await res.json()
+      const el = document.getElementById('records-list')
+      if (_recordsOffset === 0 && !d.records.length) {
+        el.innerHTML = '<div class="empty">No records yet.<br>Call the CCIP handler to write one.</div>'
+        return
+      }
+      d.records.forEach(r => {
+        const div = document.createElement('div')
+        div.innerHTML = recordRow(r)
+        el.insertBefore(div.firstElementChild, sentinel)
+      })
+      _recordsOffset += d.records.length
+      if (!d.hasMore) {
+        _recordsExhausted = true
+        if (sentinel) sentinel.textContent = ''
+        if (_recordsObserver) { _recordsObserver.disconnect(); _recordsObserver = null }
+      } else {
+        if (sentinel) sentinel.textContent = ''
+      }
+    } finally {
+      _recordsLoading = false
     }
-    el.innerHTML = records.map(r => \`
-      <div class="record-row">
-        <div class="record-hash">\${r.inputHash}</div>
-        <div class="record-source \${r.sourcePeer ? 'peer' : 'local'}">\${r.sourcePeer ? '↓ peer' : '● local'}</div>
-        <div class="record-time">\${rel(r.timestamp)}</div>
-      </div>
-    \`).join('')
+  }
+
+  function initRecordsScroll() {
+    _recordsOffset = 0; _recordsLoading = false; _recordsExhausted = false
+    const el = document.getElementById('records-list')
+    el.innerHTML = '<div id="records-sentinel" style="height:1px;text-align:center;font-size:11px;color:var(--muted);padding:4px 0"></div>'
+    if (_recordsObserver) _recordsObserver.disconnect()
+    _recordsObserver = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) loadMoreRecords()
+    }, { threshold: 0.1 })
+    _recordsObserver.observe(document.getElementById('records-sentinel'))
+    loadMoreRecords()
   }
 
   let _signerAddress = null
@@ -1972,7 +2028,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     document.getElementById('s-interval').textContent = d.syncInterval
 
     renderPeers(d.peers, d.version)
-    renderRecords(d.recent)
+    if (_recordsOffset === 0) initRecordsScroll()
 
     document.getElementById('ni-addr').textContent     = d.signerAddress || 'dry-run'
     document.getElementById('ni-ns').textContent       = d.namespace
