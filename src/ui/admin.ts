@@ -2148,7 +2148,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   let _recordsObserver = null
 
   function recordRow(r) {
-    const src = r.sourcePeer ? r.sourcePeer.replace(/^https?:\/\//, '').replace(/\/.*/,'') : null
+    const src = r.sourcePeer ? (r.sourcePeer.split('//')[1] ?? r.sourcePeer).split('/')[0] : null
     return \`<div class="record-row">
       <div class="record-hash">\${r.inputHash}</div>
       <div class="record-source \${src ? 'peer' : 'local'}">\${src ? '↓ ' + src : '● local'}</div>
