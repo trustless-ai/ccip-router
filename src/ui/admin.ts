@@ -106,6 +106,9 @@ adminRouter.post('/siwe/reset', async (c) => {
       error: 'No ADMIN_SECRET configured. To recover, SSH to the node and remove adminAddress from config.json.',
     }, 403)
   }
+  if (process.env.ADMIN_ADDRESS?.trim()) {
+    return c.json({ error: 'ADMIN_ADDRESS env var is set — remove it from your deployment environment to unclaim.' }, 403)
+  }
   const body = await c.req.json<{ secret?: string }>().catch(() => ({ secret: undefined }))
   if (!body.secret || body.secret !== config.adminSecret) {
     return c.json({ error: 'invalid secret' }, 401)

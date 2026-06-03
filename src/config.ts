@@ -131,6 +131,7 @@ export function loadConfig(): Config {
     NETWORK_KEY:         process.env.NETWORK_KEY          ?? file.networkKey,
     DISABLE_ADMIN:       process.env.DISABLE_ADMIN        ?? String(file.disableAdmin ?? 'false'),
     RESOLVER_ADDRESS:    process.env.RESOLVER_ADDRESS     ?? file.resolverAddress,
+    ADMIN_ADDRESS:       process.env.ADMIN_ADDRESS        ?? undefined,
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -186,7 +187,12 @@ export function loadConfig(): Config {
     console.log(`[config] node url:  ${nodeUrl}${nodeRegistry ? ` registry=${nodeRegistry}` : ''}`)
   }
 
-  const adminAddress = file.adminAddress?.trim() || null
+  // ADMIN_ADDRESS env var takes precedence over config.json — use this on stateless deployments
+  // (Railway, Fly, etc.) where config.json is wiped on every restart.
+  const adminAddress = raw.ADMIN_ADDRESS?.trim() || file.adminAddress?.trim() || null
+  if (raw.ADMIN_ADDRESS?.trim()) {
+    console.log(`[config] admin:     locked to env ADMIN_ADDRESS=${adminAddress}`)
+  }
 
   const rawCdnProvider = raw.CDN_PROVIDER?.trim().toLowerCase()
   const cdnProvider = (rawCdnProvider === 'pinata' || rawCdnProvider === 'storacha')
@@ -242,7 +248,12 @@ export function getConfig(): Config {
 }
 
 // Persist adminAddress to config.json and update the in-memory singleton without restart.
+// No-op when ADMIN_ADDRESS env var is set — env var is the immutable source of truth.
 export function setAdminAddress(address: string): void {
+  if (process.env.ADMIN_ADDRESS?.trim()) {
+    console.warn('[config] ADMIN_ADDRESS env var is set — ignoring setAdminAddress (use env var to change)')
+    return
+  }
   if (_config) _config.adminAddress = address
   let existing: ConfigFile = {}
   if (existsSync(CONFIG_FILE_PATH)) {
@@ -253,7 +264,12 @@ export function setAdminAddress(address: string): void {
 }
 
 // Clear adminAddress — returns node to unclaimed state.
+// No-op when ADMIN_ADDRESS env var is set.
 export function clearAdminAddress(): void {
+  if (process.env.ADMIN_ADDRESS?.trim()) {
+    console.warn('[config] ADMIN_ADDRESS env var is set — cannot clear adminAddress via reset (remove the env var to unclaim)')
+    return
+  }
   if (_config) _config.adminAddress = null
   let existing: ConfigFile = {}
   if (existsSync(CONFIG_FILE_PATH)) {
