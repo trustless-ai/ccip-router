@@ -37,7 +37,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/echo-merlini/ccip-router:latest
+            ${{ github.ref_type == 'branch' && 'ghcr.io/echo-merlini/ccip-router:latest' || '' }}
             ghcr.io/echo-merlini/ccip-router:${{ steps.pkg.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
