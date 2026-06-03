@@ -10,6 +10,8 @@ import { requireAdmin, setAdminSession, clearAdminSession } from './auth.js'
 import { generateNonce, verifySiwe } from './siwe.js'
 import { publishAttestation, type ChainOpts } from '../chain/publish.js'
 import { registerNode } from '../chain/register.js'
+import { getPublicClient } from '../chain/client.js'
+import { NODE_REGISTRY_ABI } from '../chain/abi.js'
 import { getCdnProvider } from '../cdn/index.js'
 import { namehash } from 'viem/ens'
 import { NODE_VERSION } from '../version.js'
@@ -386,6 +388,53 @@ adminRouter.delete('/api/peers', async (c) => {
   if (!url) return c.json({ error: 'url required' }, 400)
   await getDB().removePeer(url)
   return c.json({ ok: true })
+})
+
+// Discover peers from NodeRegistry — returns all registered nodes with health + already-added status.
+adminRouter.get('/api/peers/discover', async (c) => {
+  const config = getConfig()
+  if (!config.nodeRegistry || !config.rpcUrl) {
+    return c.json({ error: 'NODE_REGISTRY and RPC_URL required for peer discovery' }, 400)
+  }
+
+  const client  = getPublicClient(config.rpcUrl, config.chainId)
+  const address = config.nodeRegistry as `0x${string}`
+
+  const count = await client.readContract({ address, abi: NODE_REGISTRY_ABI, functionName: 'nodeCount' }) as bigint
+  if (count === 0n) return c.json({ nodes: [] })
+
+  const { signers, urls } = await client.readContract({
+    address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
+    args: [0n, count > 50n ? 50n : count],
+  }) as unknown as { signers: `0x${string}`[]; urls: string[]; timestamps: bigint[] }
+
+  const existingUrls = new Set((await getDB().getPeers()).map(p => p.url.toLowerCase()))
+  const ownUrl = config.nodeUrl?.toLowerCase()
+
+  const nodes = await Promise.all(
+    urls.map(async (url, i) => {
+      if (!url || (ownUrl && url.toLowerCase() === ownUrl)) return null
+      const signerAddress = signers[i]
+      const alreadyPeer   = existingUrls.has(url.toLowerCase())
+      try {
+        const ac    = new AbortController()
+        const timer = setTimeout(() => ac.abort(), 3000)
+        const res   = await fetch(`${url}/health`, { signal: ac.signal }).finally(() => clearTimeout(timer))
+        const h     = await res.json() as Record<string, unknown>
+        if (h.listed === false) return null
+        return {
+          url, signerAddress, alreadyPeer, healthy: true,
+          role:    (h.role as string) ?? ((h.version && /^\d+\.\d+/.test(h.version as string)) ? 'router' : 'gateway'),
+          version: (h.version as string) ?? null,
+          tiers:   (h.tiers as Record<string, boolean>) ?? null,
+        }
+      } catch {
+        return { url, signerAddress, alreadyPeer, healthy: false, role: 'unknown', version: null, tiers: null }
+      }
+    })
+  )
+
+  return c.json({ nodes: nodes.filter(Boolean) })
 })
 
 adminRouter.get('/api/config', (c) => {
@@ -1394,8 +1443,16 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     <div class="panel">
       <div class="panel-header">
         <div class="panel-title">Peers</div>
+        <button class="btn btn-ghost btn-sm" id="discover-btn" onclick="discoverPeers()">⊕ Discover</button>
       </div>
       <div id="peers-list"><div class="empty">Loading...</div></div>
+      <div id="discover-section" style="display:none;border-top:1px solid var(--border);margin-top:4px;padding-top:8px">
+        <div style="font-size:11px;color:var(--subtle);padding:0 16px 8px;display:flex;align-items:center;justify-content:space-between">
+          <span>Nodes registered on-chain (NodeRegistry)</span>
+          <button onclick="document.getElementById('discover-section').style.display='none'" style="background:none;border:none;color:var(--subtle);cursor:pointer;font-size:13px;padding:0">✕</button>
+        </div>
+        <div id="discover-list"></div>
+      </div>
       <div class="add-peer">
         <input type="text" id="peer-input" placeholder="https://gateway-b.example.com"/>
         <button class="btn btn-ghost btn-sm" onclick="addPeer()">+ Add</button>
@@ -1999,6 +2056,80 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
         </div>
       </div>
     \`}).join('')
+  }
+
+  async function discoverPeers() {
+    const btn     = document.getElementById('discover-btn')
+    const section = document.getElementById('discover-section')
+    const list    = document.getElementById('discover-list')
+    btn.textContent = '⊕ Discovering...'
+    btn.disabled = true
+    list.innerHTML = '<div class="empty" style="padding:12px 16px">Querying NodeRegistry...</div>'
+    section.style.display = 'block'
+    try {
+      const res  = await fetch('/admin/api/peers/discover')
+      const data = await res.json()
+      if (!res.ok) {
+        list.innerHTML = \`<div class="empty" style="padding:12px 16px;color:var(--red)">\${data.error || 'Discovery failed'}</div>\`
+        return
+      }
+      renderDiscoverNodes(data.nodes)
+    } catch (e) {
+      list.innerHTML = \`<div class="empty" style="padding:12px 16px;color:var(--red)">\${e.message}</div>\`
+    } finally {
+      btn.textContent = '⊕ Discover'
+      btn.disabled = false
+    }
+  }
+
+  function renderDiscoverNodes(nodes) {
+    const list = document.getElementById('discover-list')
+    if (!nodes.length) {
+      list.innerHTML = '<div class="empty" style="padding:12px 16px">No other nodes found in NodeRegistry.</div>'
+      return
+    }
+    list.innerHTML = nodes.map(n => {
+      const role     = peerRole(n.version)
+      const roleBadge = \`<span style="font-size:10px;background:\${role.bg};color:\${role.color};padding:1px 6px;border-radius:3px;margin-left:6px;font-weight:600">\${n.role}</span>\`
+      const healthDot = \`<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:\${n.healthy ? 'var(--green)' : 'var(--red)'};flex-shrink:0;margin-right:8px"></span>\`
+      const actionBtn = n.alreadyPeer
+        ? \`<span style="font-size:11px;color:var(--subtle);padding:4px 8px">connected</span>\`
+        : \`<button class="btn btn-ghost btn-sm" onclick="connectDiscovered('\${n.url}', this)">+ Connect</button>\`
+      return \`
+        <div class="peer-row">
+          \${healthDot}
+          <div class="peer-info">
+            <div class="peer-url">\${n.url}\${roleBadge}</div>
+            <div class="peer-meta">\${trunc(n.signerAddress, 20)}\${n.version ? ' · v' + n.version : ''}</div>
+          </div>
+          <div class="peer-actions">\${actionBtn}</div>
+        </div>\`
+    }).join('')
+  }
+
+  async function connectDiscovered(url, btn) {
+    btn.disabled = true
+    btn.textContent = 'Connecting...'
+    try {
+      const res = await fetch('/admin/api/peers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      if (res.ok) {
+        btn.textContent = 'Connected'
+        btn.style.color = 'var(--green)'
+        btn.style.borderColor = 'var(--green)'
+        loadStatus()
+      } else {
+        const { error } = await res.json()
+        btn.textContent = error || 'Failed'
+        btn.disabled = false
+      }
+    } catch (e) {
+      btn.textContent = 'Error'
+      btn.disabled = false
+    }
   }
 
   function isOlderSemver(a, b) {
