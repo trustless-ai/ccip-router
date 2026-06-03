@@ -2776,6 +2776,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   // Canonical shared deployments — one per chain, all nodes on the same chain share these.
   // Add an entry here after deploying to a new chain so future operators can skip deployment.
   const KNOWN_DEPLOYMENTS = {
+    1: {
+      attestationIndex: '0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210',
+      nodeRegistry:     '0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D',
+    },
     11155111: {
       attestationIndex: '0x107D706112225aC57eCf6692FBbDC283fb6E3698',
       nodeRegistry:     '0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7',
