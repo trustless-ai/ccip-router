@@ -190,9 +190,18 @@ docker compose up --build
 
 ---
 
-## Connect to the Sepolia contracts
+## Connect to the deployed contracts
 
 All ccip-router contracts are deployed and shared — no need to deploy your own.
+
+### Mainnet
+
+| Contract | Address | Role |
+|---|---|---|
+| `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) | OCP-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
+| `NodeRegistry` | [`0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D) | Public node directory |
+
+### Sepolia (testnet)
 
 | Contract | Address | Role |
 |---|---|---|
@@ -211,9 +220,16 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 
 **How ccip-router connects to ERC-8263:** ccip-router anchors its `commitmentHash` as the `proofHash` in `TruthAnchorV1`. ERC-8263's `proofHash` is deliberately opaque — the same anchor layer serves OCP, WYRIWE, and zkML uniformly. ccip-router's `commitmentHash = keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))` is one canonical instantiation of it, not the definition. Full chain: gateway signs `WyriweAttestation` (producing `commitmentHash`) → `anchor(commitmentHash)` called on `TruthAnchorV1` as the `proofHash` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by `proofHash` topic (= your `commitmentHash`) via `eth_getLogs`. V1 is event-only by design — no per-anchor storage. A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
 
-**Via admin panel:** Deploy contracts → select Sepolia → "Use these addresses →". Done.
+**Via env (mainnet):**
 
-**Via env:**
+```bash
+ATTESTATION_INDEX=0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210
+NODE_REGISTRY=0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D
+RPC_URL=https://ethereum.publicnode.com
+CHAIN_ID=1
+```
+
+**Via env (Sepolia testnet):**
 
 ```bash
 ATTESTATION_INDEX=0x107D706112225aC57eCf6692FBbDC283fb6E3698

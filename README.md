@@ -141,11 +141,12 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 
 Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.etherscan.io/address/0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14) · Solc 0.8.24 · optimizer 200 runs.
 
-### NodeRegistry — Mainnet
+### Mainnet contracts
 
 | Contract | Mainnet address |
 |---|---|
 | `NodeRegistry` | [`0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D) |
+| `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) |
 
 Gateway nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their gateway key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Two dinamic.eth mesh nodes are registered: NAS (`0x58766f90...`) and Railway (`0x2048eADf...`).
 
