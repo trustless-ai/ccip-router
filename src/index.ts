@@ -159,6 +159,7 @@ app.get('/health', async (c) => {
   return c.json({
     ok:            true,
     version:       NODE_VERSION,
+    role:          'router',
     namespace:     config.syncNamespace,
     signerAddress,
     nodeUrl:       config.nodeUrl ?? null,
@@ -175,6 +176,7 @@ app.get('/health', async (c) => {
       url:           p.url,
       healthy:       p.healthy,
       nodeVersion:   p.nodeVersion,
+      role:          p.nodeVersion && /^\d+\.\d+/.test(p.nodeVersion) ? 'router' : p.nodeVersion ? 'gateway' : 'unknown',
       signerAddress: p.signerAddress,
       lastSyncAt:    p.lastSyncAt,
     })),

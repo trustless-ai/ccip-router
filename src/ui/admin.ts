@@ -1869,6 +1869,13 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
   function trunc(s, n) { return s && s.length > n ? s.slice(0,6)+'...'+s.slice(-4) : (s||'—') }
 
+  function peerRole(version) {
+    if (!version) return { label: 'unknown', bg: '#374151', color: '#9ca3af' }
+    const isSemver = /^\d+\.\d+/.test(version)
+    if (isSemver)  return { label: 'router',  bg: '#1e3a5f', color: '#60a5fa' }
+    return               { label: 'gateway', bg: '#2d1b69', color: '#a78bfa' }
+  }
+
   function renderPeers(peers, ourVersion) {
     const el = document.getElementById('peers-list')
     if (!peers.length) {
@@ -1877,14 +1884,16 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     }
     el.innerHTML = peers.map(p => {
       const outdated = p.nodeVersion && ourVersion && isOlderSemver(p.nodeVersion, ourVersion)
-      const badge    = outdated
+      const upgradeBadge = outdated
         ? \` <span style="font-size:10px;background:#f59e0b;color:#000;padding:1px 5px;border-radius:3px;margin-left:4px">upgrade v\${p.nodeVersion}</span>\`
         : ''
+      const role = peerRole(p.nodeVersion)
+      const roleBadge = \`<span style="font-size:10px;background:\${role.bg};color:\${role.color};padding:1px 6px;border-radius:3px;margin-left:6px;letter-spacing:.03em;font-weight:600">\${role.label}</span>\`
       return \`
       <div class="peer-row">
         <div class="health-dot \${p.healthy ? 'ok' : 'err'}"></div>
         <div class="peer-info">
-          <div class="peer-url">\${p.url}\${badge}</div>
+          <div class="peer-url">\${p.url}\${roleBadge}\${upgradeBadge}</div>
           <div class="peer-meta">\${trunc(p.signerAddress,20)} · \${rel(p.lastSyncAt)}\${p.nodeVersion ? ' · v'+p.nodeVersion : ''}</div>
         </div>
         <div class="peer-actions">
