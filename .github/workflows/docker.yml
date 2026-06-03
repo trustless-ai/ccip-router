@@ -43,5 +43,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trigger Railway redeploy
-        if: github.ref_type == 'branch' && secrets.RAILWAY_DEPLOY_HOOK != ''
-        run: curl -sX POST "${{ secrets.RAILWAY_DEPLOY_HOOK }}"
+        if: github.ref_type == 'branch'
+        env:
+          RAILWAY_DEPLOY_HOOK: ${{ secrets.RAILWAY_DEPLOY_HOOK }}
+        run: '[ -n "$RAILWAY_DEPLOY_HOOK" ] && curl -sX POST "$RAILWAY_DEPLOY_HOOK" || true'
