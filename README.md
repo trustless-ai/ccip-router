@@ -425,6 +425,10 @@ Visit `/admin` after setup. Features:
 - Manual sync trigger
 - Auto-refresh every 15 seconds
 
+**Peer discovery:** The peers panel has a **⊕ Discover** button that queries the on-chain `NodeRegistry` and lists all registered nodes not yet added as peers — with live health checks and one-click connect. Requires `NODE_REGISTRY` and `RPC_URL` to be configured.
+
+**Header role badge:** A **ROUTER** / **GATEWAY** / **UNKNOWN** badge in the top-right header shows this node's role derived from its version string — same colour scheme as the peers panel badges.
+
 **Auth — claim on first login (EIP-4361 SIWE):** On a fresh node the login page shows an amber "Unclaimed node" banner. Connect any browser wallet and sign once — that wallet address is saved to `config.json` as the permanent admin. Subsequent logins must match that address. Admin wallet is completely decoupled from the gateway signing key (`GATEWAY_PRIVATE_KEY` stays server-side).
 
 > On stateless deployments (Railway, Fly, etc.), set `ADMIN_ADDRESS` as an env var instead — `config.json` is wiped on every restart. See [Self-hosted vs stateless](#self-hosted-vs-stateless-deployments).
@@ -627,6 +631,9 @@ GET  /admin/api/config          safe config snapshot (never exposes private key)
 POST /admin/api/config          update config fields → writes config.json, restarts node
 POST /admin/api/key             { gatewayKey } — rotate signing key → restart
 POST /admin/api/register        register node on-chain via NodeRegistry
+GET  /admin/api/peers/discover  query NodeRegistry for registered nodes not yet added as peers
+                                  → { nodes: [{ url, signerAddress, healthy, role, version, alreadyPeer }] }
+                                  requires NODE_REGISTRY + RPC_URL
 ```
 
 ---
@@ -745,6 +752,8 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] `/health` `role` field at node level and per-peer — exposes mesh topology to any client
 - [x] `GET /records` on ENS Boiler (ens-dynamic-kit) — gateway nodes now participate bidirectionally; router nodes pull attestation records from gateway peers on every sync tick
 - [x] Heterogeneous mesh — any stack implementing the `/records` protocol joins the mesh regardless of language or runtime
+- [x] Peer discovery from NodeRegistry — "⊕ Discover" button in peers panel queries `NodeRegistry` on-chain and lists registered nodes not yet added, with health check + one-click connect
+- [x] Role badge in admin header — ROUTER / GATEWAY / UNKNOWN derived from node's own version, replaces namespace pill
 
 ---
 
