@@ -353,6 +353,7 @@ npm run dev
 |---|---|---|---|
 | `GATEWAY_PRIVATE_KEY` | Yes* | — | 32-byte hex signing key (`0x...`). Without it the node runs in dry-run mode (unsigned records). |
 | `ADMIN_SECRET` | No | — | Protects `/admin`. Set for any non-local deployment. Without it the dashboard is open. |
+| `ADMIN_ADDRESS` | No** | — | Ethereum address of the admin wallet. Locks admin permanently — survives restarts, overrides `config.json`. **Required on stateless deployments (Railway, Fly, Render).** |
 | `PORT` | No | `3000` | HTTP port |
 | `DB_PATH` | No | `./data.db` | SQLite file path |
 | `SYNC_NAMESPACE` | No | `agent-attestations` | Record namespace — peers must match |
@@ -374,6 +375,43 @@ npm run dev
 | `RESOLVER_ADDRESS` | No | — | Deployed `OffchainResolver` contract (informational — shown in spec audit). |
 
 \* Can also come from `config.json` written by the setup wizard.
+\** Optional on persistent deployments; required on stateless ones — see [Self-hosted vs stateless](#self-hosted-vs-stateless-deployments) below.
+
+---
+
+## Self-hosted vs stateless deployments
+
+The admin authentication model differs depending on whether your deployment has a persistent filesystem.
+
+### Self-hosted (NAS, VPS, home server, Docker with a volume)
+
+`config.json` survives restarts. Admin is claimed on first login via SIWE and the address is written to disk — it persists across reboots.
+
+```env
+GATEWAY_PRIVATE_KEY=0x...   # required
+ADMIN_SECRET=...            # recommended — Bearer fallback for CLI / scripts
+# ADMIN_ADDRESS not needed — claimed via browser wallet on first login
+```
+
+Flow: boot node → visit `/admin/login` → connect MetaMask → first wallet to sign claims admin permanently. Transfer admin via the dashboard if you need to change it later.
+
+### Stateless / centralized (Railway, Fly, Render, any PaaS)
+
+The container filesystem is ephemeral — `config.json` is wiped on every redeploy. Without `ADMIN_ADDRESS` set, the node returns to unclaimed state after every restart and the first wallet to visit `/admin/login` claims admin.
+
+**Set `ADMIN_ADDRESS` in your platform's environment variables UI to lock admin permanently:**
+
+```env
+GATEWAY_PRIVATE_KEY=0x...           # required — use platform secrets UI, not inline
+ADMIN_SECRET=...                    # required — no filesystem to protect with file perms
+ADMIN_ADDRESS=0x<your-wallet>       # required — locks admin across all redeploys
+```
+
+`ADMIN_ADDRESS` takes precedence over `config.json` and is immutable at runtime — `setAdminAddress` and the SIWE reset endpoint are both no-ops when this env var is present. To change the admin wallet, update the env var in your platform dashboard and redeploy.
+
+**Recovery:** if you get locked out (wrong wallet in MetaMask, or session lost after restart), the login page shows the expected wallet address with a copy button. On a session reset (restart), just reconnect with the correct wallet. If you've genuinely lost access, update `ADMIN_ADDRESS` in the platform dashboard — no SSH required.
+
+> On Railway: set `ADMIN_ADDRESS`, `GATEWAY_PRIVATE_KEY`, and `ADMIN_SECRET` in the Variables tab. Use Railway's secret injection — never put keys inline in a Dockerfile or `railway.json`.
 
 ---
 
@@ -389,7 +427,11 @@ Visit `/admin` after setup. Features:
 
 **Auth — claim on first login (EIP-4361 SIWE):** On a fresh node the login page shows an amber "Unclaimed node" banner. Connect any browser wallet and sign once — that wallet address is saved to `config.json` as the permanent admin. Subsequent logins must match that address. Admin wallet is completely decoupled from the gateway signing key (`GATEWAY_PRIVATE_KEY` stays server-side).
 
+> On stateless deployments (Railway, Fly, etc.), set `ADMIN_ADDRESS` as an env var instead — `config.json` is wiped on every restart. See [Self-hosted vs stateless](#self-hosted-vs-stateless-deployments).
+
 **Transfer admin:** While logged in, open the "Admin wallet" panel → Transfer. Switch MetaMask to the new wallet, sign a transfer message to prove ownership — `adminAddress` is updated live and a new session is issued, no restart required.
+
+**Wrong wallet / locked out:** The login page shows the expected wallet address with a copy button and a "switch wallet" instruction. If you need to recover without the correct wallet, enter your `ADMIN_SECRET` in the recovery section — this calls `POST /admin/siwe/reset` to clear `adminAddress` back to unclaimed state. Disabled when `ADMIN_ADDRESS` is set via env var (update the env var in your platform dashboard instead).
 
 **Bearer fallback:** `Authorization: Bearer <ADMIN_SECRET>` always works for CLI / scripts regardless of SIWE state.
 
@@ -560,6 +602,10 @@ POST /admin/siwe/verify         { message, signature }
 POST /admin/siwe/transfer       { message, signature } — signed by NEW wallet
                                   current session required; updates adminAddress live
                                   → { ok, address }
+POST /admin/siwe/reset          { secret } — no session required
+                                  clears adminAddress → unclaimed state (recovery without SSH)
+                                  requires ADMIN_SECRET; no-op if ADMIN_ADDRESS env var is set
+                                  → { ok, message } | { error }
 POST /admin/logout              clear session cookie
 ```
 
