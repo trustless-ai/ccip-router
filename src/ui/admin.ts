@@ -2779,6 +2779,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     1: {
       attestationIndex: '0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210',
       nodeRegistry:     '0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D',
+      wyriweVerifier:   '0xd8a09d830b27697e1b24e8c9800e562d20318a09',
     },
     11155111: {
       attestationIndex: '0x107D706112225aC57eCf6692FBbDC283fb6E3698',
