@@ -31,8 +31,44 @@ type HealthResponse = {
   signerAddress: string | null
 }
 
-// Pull all new records from a single peer, paginating until cursor is null.
-// Optionally runs peer gossip (auto-discovery) after syncing.
+// Pull all records for a single namespace from a peer, paginating until cursor is null.
+// Returns insert/reject counts and the first signer seen (for peer identity discovery).
+async function pullNamespace(
+  peer: PeerState,
+  namespace: string,
+  db: DB,
+): Promise<{ inserted: number; rejected: number; signer: string | null; unsupported: boolean }> {
+  let cursor: string | undefined = undefined
+  let inserted = 0
+  let rejected = 0
+  let signer: string | null = null
+
+  do {
+    const url  = buildRecordsUrl(peer.url, namespace, peer.lastSyncAt, cursor)
+    const body = await fetchRecords(url)
+
+    if (body.protocol !== SUPPORTED_PROTOCOL) {
+      return { inserted, rejected, signer, unsupported: true }
+    }
+
+    for (const record of body.records) {
+      const result = await validateAndInsert(record, db, peer.signerAddress)
+      if (result.inserted) {
+        inserted++
+        if (result.signer && !signer) signer = result.signer
+      } else {
+        rejected++
+      }
+    }
+
+    cursor = body.cursor ?? undefined
+  } while (cursor !== undefined)
+
+  return { inserted, rejected, signer, unsupported: false }
+}
+
+// Pull all new records from a single peer — base namespace + wyriwe sub-namespace.
+// Runs peer gossip (auto-discovery) and fetches VNI/health once after both namespaces sync.
 export async function syncPeer(
   peer: PeerState,
   namespace: string,
@@ -40,34 +76,23 @@ export async function syncPeer(
   autoDiscover = true,
   nodeUrl?: string,
 ): Promise<Partial<PeerState>> {
-  let cursor: string | undefined = undefined
-  let inserted = 0
-  let rejected = 0
   let discoveredSigner: string | null = null
 
   try {
-    do {
-      const url  = buildRecordsUrl(peer.url, namespace, peer.lastSyncAt, cursor)
-      const body = await fetchRecords(url)
+    // Sync base namespace
+    const base = await pullNamespace(peer, namespace, db)
+    if (base.unsupported) {
+      console.warn(`[sync] ${peer.url} speaks unsupported protocol — skipping`)
+      return { healthy: false }
+    }
+    if (base.signer) discoveredSigner = base.signer
 
-      if (body.protocol !== SUPPORTED_PROTOCOL) {
-        console.warn(`[sync] ${peer.url} speaks protocol ${body.protocol} — skipping`)
-        return { healthy: false, nodeVersion: body.node_version ?? peer.nodeVersion }
-      }
+    // Sync wyriwe sub-namespace — best-effort, never fails the peer
+    const wyriwe = await pullNamespace(peer, namespace + ':wyriwe', db).catch(() => ({ inserted: 0, rejected: 0, signer: null, unsupported: false }))
+    if (wyriwe.signer && !discoveredSigner) discoveredSigner = wyriwe.signer
 
-      for (const record of body.records) {
-        const result = await validateAndInsert(record, db, peer.signerAddress)
-        if (result.inserted) {
-          inserted++
-          if (result.signer && !discoveredSigner) discoveredSigner = result.signer
-        } else {
-          rejected++
-        }
-      }
-
-      cursor = body.cursor ?? undefined
-    } while (cursor !== undefined)
-
+    const inserted = base.inserted + wyriwe.inserted
+    const rejected = base.rejected + wyriwe.rejected
     if (inserted > 0 || rejected > 0) {
       console.log(`[sync] ${peer.url} — +${inserted} inserted, ${rejected} rejected`)
     }
