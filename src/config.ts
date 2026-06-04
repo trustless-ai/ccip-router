@@ -33,9 +33,6 @@ export type Config = {
   disableAdmin:     boolean
   // On-chain CCIP-Read resolver contract (informational — shown in spec audit)
   resolverAddress:  `0x${string}` | null
-  // Watchtower HTTP API — optional, enables one-click upgrade in admin
-  watchtowerUrl:    string | null
-  watchtowerToken:  string | null
 }
 
 export type ConfigFile = {
@@ -135,8 +132,6 @@ export function loadConfig(): Config {
     DISABLE_ADMIN:       process.env.DISABLE_ADMIN        ?? String(file.disableAdmin ?? 'false'),
     RESOLVER_ADDRESS:    process.env.RESOLVER_ADDRESS     ?? file.resolverAddress,
     ADMIN_ADDRESS:       process.env.ADMIN_ADDRESS        ?? undefined,
-    WATCHTOWER_API_URL:  process.env.WATCHTOWER_API_URL   ?? undefined,
-    WATCHTOWER_API_TOKEN: process.env.WATCHTOWER_API_TOKEN ?? undefined,
   }
 
   const gatewayKey = raw.GATEWAY_PRIVATE_KEY
@@ -241,8 +236,6 @@ export function loadConfig(): Config {
     networkKey,
     disableAdmin,
     resolverAddress,
-    watchtowerUrl:    raw.WATCHTOWER_API_URL?.trim() || null,
-    watchtowerToken:  raw.WATCHTOWER_API_TOKEN?.trim() || null,
   }
 }
 

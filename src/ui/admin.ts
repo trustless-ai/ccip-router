@@ -173,7 +173,6 @@ adminRouter.get('/api/status', async (c) => {
       vni:      !!(config.gatewayKey && config.nodeUrl),
       onChain:  !!(config.attestationIndex && config.rpcUrl),
     },
-    watchtowerEnabled: !!(config.watchtowerUrl && config.watchtowerToken),
     unreadMessages,
     peers: peers.map((p) => ({
       url: p.url, healthy: p.healthy,
@@ -377,21 +376,16 @@ adminRouter.post('/api/publish', async (c) => {
   return c.json({ ok: true, published, skipped, errors })
 })
 
-adminRouter.post('/api/upgrade', async (c) => {
-  const config = getConfig()
-  if (!config.watchtowerUrl || !config.watchtowerToken) {
-    return c.json({ error: 'WATCHTOWER_API_URL and WATCHTOWER_API_TOKEN required' }, 400)
-  }
+adminRouter.get('/api/upgrade', async (c) => {
   try {
-    const res = await fetch(`${config.watchtowerUrl}/v1/update`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.watchtowerToken}` },
-    })
-    if (!res.ok) return c.json({ error: `Watchtower returned ${res.status}` }, 502)
-    console.log('[upgrade] Watchtower triggered — pulling latest image')
-    return c.json({ ok: true })
+    const res     = await fetch('https://registry.npmjs.org/ccip-router/latest', { signal: AbortSignal.timeout(5000) })
+    const data    = await res.json() as { version: string }
+    const latest  = data.version
+    const current = NODE_VERSION
+    const upToDate = latest === current
+    return c.json({ current, latest, upToDate })
   } catch (err) {
-    return c.json({ error: `Watchtower unreachable: ${(err as Error).message}` }, 502)
+    return c.json({ error: `npm registry unreachable: ${(err as Error).message}` }, 502)
   }
 })
 
@@ -2053,12 +2047,16 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
   <div class="audit-panel" id="upgrade-panel" style="margin-top:16px;display:none">
     <div class="audit-header" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none'">
-      <div class="panel-title">Node upgrade</div>
+      <div class="panel-title">Node version</div>
       <span class="audit-chevron">▼</span>
     </div>
     <div style="display:none;padding:16px">
-      <p style="font-size:13px;color:var(--subtle);margin:0 0 12px">Pull the latest image and restart this node. Managed via Watchtower — no Docker socket exposure required.</p>
-      <button class="btn btn-primary btn-sm" id="btn-upgrade" onclick="upgradeNode()">↑ Pull latest &amp; restart</button>
+      <div class="cfg-row-2" style="margin-bottom:12px">
+        <div class="cfg-field"><label class="cfg-label">Running</label><div class="cfg-readonly" id="upgrade-current">—</div></div>
+        <div class="cfg-field"><label class="cfg-label">Latest (npm)</label><div class="cfg-readonly" id="upgrade-latest">—</div></div>
+      </div>
+      <p id="upgrade-msg" style="font-size:13px;color:var(--subtle);margin:0 0 12px"></p>
+      <button class="btn btn-ghost btn-sm" id="btn-upgrade" onclick="upgradeNode()">↻ Check for update</button>
       <span id="upgrade-status" style="font-size:12px;color:var(--text-muted);margin-left:10px"></span>
     </div>
   </div>
@@ -2321,8 +2319,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     }
     if (msgOpen) loadMessages()
 
-    // Upgrade panel — only visible when Watchtower is configured
-    document.getElementById('upgrade-panel').style.display = d.watchtowerEnabled ? 'block' : 'none'
+    document.getElementById('upgrade-panel').style.display = 'block'
 
     // Show warning banner if admin is open
     document.getElementById('warn-banner').style.display = d.protected ? 'none' : 'flex'
@@ -2462,19 +2459,26 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   async function upgradeNode() {
     const btn    = document.getElementById('btn-upgrade')
     const status = document.getElementById('upgrade-status')
-    btn.disabled = true; btn.textContent = '↑ Triggering...'
+    const msg    = document.getElementById('upgrade-msg')
+    btn.disabled = true; btn.textContent = '↻ Checking...'
     status.textContent = ''
     try {
-      const res  = await fetch('/admin/api/upgrade', { method: 'POST' })
+      const res  = await fetch('/admin/api/upgrade')
       const data = await res.json()
-      if (!res.ok) { status.textContent = data.error || 'Failed'; toast(data.error || 'Upgrade failed'); return }
-      status.textContent = 'Watchtower notified — node will restart shortly'
-      toast('↑ Upgrade triggered — node restarting')
+      if (!res.ok) { status.textContent = data.error || 'Failed'; return }
+      document.getElementById('upgrade-current').textContent = data.current
+      document.getElementById('upgrade-latest').textContent  = data.latest
+      if (data.upToDate) {
+        msg.textContent = '✓ Running the latest version.'
+        msg.style.color = 'var(--green)'
+      } else {
+        msg.innerHTML = 'Update available: ' + data.current + ' &rarr; ' + data.latest + '. Watchtower will auto-pull within 5 minutes, or restart the container manually.'
+        msg.style.color = 'var(--subtle)'
+      }
     } catch (e) {
       status.textContent = 'Error: ' + e.message
-      toast('Upgrade error: ' + e.message)
     } finally {
-      btn.disabled = false; btn.textContent = '↑ Pull latest & restart'
+      btn.disabled = false; btn.textContent = '↻ Check for update'
     }
   }
 
