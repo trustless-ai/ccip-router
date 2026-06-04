@@ -400,13 +400,20 @@ adminRouter.get('/api/peers/discover', async (c) => {
   const client  = getPublicClient(config.rpcUrl, config.chainId)
   const address = config.nodeRegistry as `0x${string}`
 
-  const count = await client.readContract({ address, abi: NODE_REGISTRY_ABI, functionName: 'nodeCount' }) as bigint
-  if (count === 0n) return c.json({ nodes: [] })
-
-  const { signers, urls } = await client.readContract({
-    address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
-    args: [0n, count > 50n ? 50n : count],
-  }) as unknown as { signers: `0x${string}`[]; urls: string[]; timestamps: bigint[] }
+  let count: bigint
+  let signers: `0x${string}`[]
+  let urls: string[]
+  try {
+    count = await client.readContract({ address, abi: NODE_REGISTRY_ABI, functionName: 'nodeCount' }) as bigint
+    if (count === 0n) return c.json({ nodes: [] })
+    ;({ signers, urls } = await client.readContract({
+      address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
+      args: [0n, count > 50n ? 50n : count],
+    }) as unknown as { signers: `0x${string}`[]; urls: string[]; timestamps: bigint[] })
+  } catch (err) {
+    console.error('[discover] contract read failed:', err)
+    return c.json({ error: `Registry read failed: ${(err as Error).message ?? err}` }, 502)
+  }
 
   const existingUrls = new Set((await getDB().getPeers()).map(p => p.url.toLowerCase()))
   const ownUrl = config.nodeUrl?.toLowerCase()
