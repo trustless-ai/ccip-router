@@ -108,7 +108,7 @@ graph TB
     S["EIP-191 · Record signing\nkeccak256(inputHash · namespace · valueHash · ts)"]
     W["WYRIWE · Input provenance\nsentinel path: inputHash = rawInputHash\nnon-sentinel: inputHash = keccak256(abi.encode(raw, pipelineHash))"]
     I["ERC-8004 · Agent identity\nagentId · registryAddress declared on-chain"]
-    O["OCP / ERC-8263 · Observation commitment\ncommitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)\nccip-router anchors commitmentHash as proofHash in TruthAnchorV1"]
+    O["ERC-8281 (OCP) / ERC-8263 · Observation commitment\ncommitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)\nccip-router anchors commitmentHash as proofHash in TruthAnchorV1"]
     A["EIP-712 · WyriweAttestation\nstructured signing · verifiable by any peer · synced by mesh"]
     V["VNI · Node identity\nEIP-191 signed { nodeId · signerAddress · url · version · ts }"]
     C["On-chain anchoring · Sepolia\nAttestationIndex — signerOf · commitmentOf\nNodeRegistry — register(url, sig)"]
@@ -124,9 +124,9 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 
 | Contract | Sepolia address | Purpose |
 |---|---|---|
-| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | ccip-router's OCP-compatible commitment store. Stores `signerOf[commitmentHash]` and `commitmentOf[inputHash]`. Valid OCP anchor — distinct from the ERC-8263 canonical contract. |
+| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | ccip-router's ERC-8281 (OCP)-compatible commitment store. Stores `signerOf[commitmentHash]` and `commitmentOf[inputHash]`. Valid ERC-8281 anchor — distinct from the ERC-8263 canonical contract. |
 | `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public directory of nodes. `register(url, sig)` proves key ownership via EIP-191 — the relayer (`msg.sender`) does not need to be the signing key. |
-| `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96#code) | ERC-8274 `IProofVerifier` implementation. `verify(inputHash, outputHash, abi.encode(agentId, registry), abi.encode(modelHash, rawInputHash, sanitizationPipelineHash, commitmentHash, timestamp, sig))` — recomputes OCP commitment, recovers signer, returns bool. No external calls. |
+| `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96#code) | ERC-8274 `IProofVerifier` implementation. `verify(inputHash, outputHash, abi.encode(agentId, registry), abi.encode(modelHash, rawInputHash, sanitizationPipelineHash, commitmentHash, timestamp, sig))` — recomputes ERC-8281 (OCP) commitment, recovers signer, returns bool. No external calls. |
 | `WyriweAttestationVerifier` *(deprecated)* | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier`. Superseded by `WyriweProofVerifier`. |
 
 **ERC-8263 canonical reference contract** (Vincent Wu, not ccip-router):
@@ -135,7 +135,7 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 |---|---|---|
 | `TruthAnchorV1` | [`0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C`](https://sepolia.etherscan.io/address/0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C) | [`0xe95d6a15966984c209a62a2c188828555eb5ec3d`](https://etherscan.io/address/0xe95d6a15966984c209a62a2c188828555eb5ec3d) |
 
-`TruthAnchorV1` emits the canonical `AnchorProof(uint8 agentIdScheme, bytes32 agentId, bytes32 proofHash, address operator, bytes aux)` event that OCP's ERC-8263 extraction rule is written against. `AttestationIndex` sits alongside it as the transport-layer commitment store — the two are separate primitives by design.
+`TruthAnchorV1` emits the canonical `AnchorProof(uint8 agentIdScheme, bytes32 agentId, bytes32 proofHash, address operator, bytes aux)` event that ERC-8281 (OCP)'s ERC-8263 extraction rule is written against. `AttestationIndex` sits alongside it as the transport-layer commitment store — the two are separate primitives by design.
 
 **How ccip-router connects to ERC-8263:** ccip-router anchors its `commitmentHash` as the `proofHash` in `TruthAnchorV1`. ERC-8263's `proofHash` is deliberately opaque — the same anchor layer serves OCP, WYRIWE, and zkML uniformly. ccip-router's `commitmentHash = keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))` is one canonical instantiation of it, not the definition. Full chain: inference runs → gateway signs `WyriweAttestation` (producing `commitmentHash`) → `anchor(commitmentHash)` called on `TruthAnchorV1` as the `proofHash` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by the `proofHash` topic (= your `commitmentHash`) and compare the anchoring block's timestamp against your execution time. V1 is event-only by design (no per-anchor storage cost). A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
 
@@ -511,7 +511,7 @@ GET /records?namespace=<str>&since=<unix>&limit=<n>&cursor=<str>
   }
 ```
 
-### OCP observation commitment (ERC-8263)
+### ERC-8281 (OCP) observation commitment (ERC-8263)
 ```
 GET /ocp/:inputHash
 → {
@@ -668,7 +668,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 | EIP-3668 | Transport | CCIP-Read client-to-gateway | ✅ implemented |
 | WYRIWE | L2 Input trust | Triple-hash commitment, EIP-712 attestation | ✅ implemented |
 | ERC-8004 | L1 Identity | Agent identity `agentId` + `registryAddress` in attestation | ✅ implemented |
-| OCP / ERC-8263 | L3 Observation | Observation commitment hash. `AttestationIndex` = OCP-compatible anchor. Canonical ERC-8263 reference: `TruthAnchorV1` (Vincent Wu). | ✅ implemented |
+| ERC-8281 (OCP) / ERC-8263 | L3 Observation | Observation commitment hash. `AttestationIndex` = ERC-8281-compatible anchor. Canonical ERC-8263 reference: `TruthAnchorV1` (Vincent Wu). | ✅ implemented |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
 | VNI | L5 Node Identity | Signed node identity, peer gossip | ✅ implemented |
 | ERC-8275 | L6 Economics | Contribution attribution (`/contributions` — per-peer record counts, foundation for usage-based node compensation) | ✅ implemented |
@@ -689,19 +689,19 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] `withWyriwe()` — EIP-712 attestation, triple-hash chain, IDENTITY_SENTINEL path
 - [x] `/verify` — clean proof per namespace: `{ verified, signer, signingType, signature, attestation }`
 - [x] ERC-8004 identity — `AGENT_ID` + `REGISTRY_ADDRESS` + `CHAIN_ID`, `/identity` endpoint, `/health` field
-- [x] OCP / ERC-8263 — `commitmentHash` in `WyriweAttestation`, `/ocp/:inputHash` endpoint
+- [x] ERC-8281 (OCP) / ERC-8263 — `commitmentHash` in `WyriweAttestation`, `/ocp/:inputHash` endpoint
 - [x] Router SVG favicon, dinamic.eth design language
 - [x] Peer signer pinning — reject records with unexpected signer after first sync
 - [x] Peer health polling — fetch `/health` after every sync, populate `nodeVersion` + `signerAddress`
 - [x] Graceful shutdown — `SIGTERM`/`SIGINT` → `server.close()` → `db.close()` → `process.exit(0)`
 - [x] In-memory log ring buffer (200 lines, console-patched) → `/admin/api/logs` + colour-coded log panel
-- [x] Stack status pills in admin header bar — Signing / ERC-8004 / WYRIWE / OCP
+- [x] Stack status pills in admin header bar — Signing / ERC-8004 / WYRIWE / ERC-8281
 - [x] Library re-export (`src/lib.ts`) — `CcipRouter`, `withWyriwe`, `IdentityOpts`, `WyriweOpts`, `ResolverFn`, DB types
 
 - [x] `withWyriwe()` non-sentinel path — `sanitizationCID` option; `inputHash = keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))`
 - [x] Setup wizard reconfigure flow — pre-fills current config, "Keep existing key", `/setup/current-config` endpoint, inherited admin secret
 
-- [x] Spec audit accordion panel in admin — per-spec cards (EIP-3668 / WYRIWE / ERC-8004 / OCP), inline summary pills, expandable detail grid with missing-config hints
+- [x] Spec audit accordion panel in admin — per-spec cards (EIP-3668 / WYRIWE / ERC-8004 / ERC-8281), inline summary pills, expandable detail grid with missing-config hints
 - [x] `contracts/AttestationIndex.sol` — on-chain anchor for WyriweAttestations; verifies EIP-712 sig against ERC-8004 registry domain, stores `signerOf[commitmentHash]` + `commitmentOf[inputHash]`
 - [x] `src/chain/` — viem public + wallet clients, `publishAttestation()`, `checkOnChain()`
 - [x] `/verify` on-chain fallback — if `inputHash` not in local DB and `ATTESTATION_INDEX` + `RPC_URL` configured, queries contract and returns on-chain proof
@@ -794,7 +794,7 @@ Tests use `SQLiteDB(':memory:')` directly (bypassing the runtime singleton) and 
 
 - [ens-boiler](https://github.com/Echo-Merlini/ens-boiler) — opinionated ENS agent stack built on `ccip-router`
 - [WYRIWE](https://github.com/TMerlini/wyriwe) — input provenance spec
-- [OCP](https://github.com/damonzwicker/observation-commitment-protocol) — observation commitment protocol
+- [ERC-8281 (OCP)](https://github.com/damonzwicker/observation-commitment-protocol) — observation commitment protocol
 
 ---
 

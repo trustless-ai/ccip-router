@@ -264,7 +264,7 @@ adminRouter.get('/api/audit', async (c) => {
           ],
     },
     {
-      key: 'ocp', name: 'OCP / ERC-8263', label: 'Observation Commitment',
+      key: 'ocp', name: 'ERC-8281 (OCP) / ERC-8263', label: 'Observation Commitment',
       status: wyriweOn ? 'pass' : 'inactive',
       description: 'Verifiable commitment linking agent, model, input, and output. Produced alongside every WYRIWE attestation.',
       details: wyriweOn
@@ -1402,7 +1402,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   <span class="tier-pill off" id="tier-signed"><span class="tp-dot"></span>Signing</span>
   <span class="tier-pill off" id="tier-erc8004"><span class="tp-dot"></span>ERC-8004</span>
   <span class="tier-pill off" id="tier-wyriwe"><span class="tp-dot"></span>WYRIWE</span>
-  <span class="tier-pill off" id="tier-ocp"><span class="tp-dot"></span>OCP</span>
+  <span class="tier-pill off" id="tier-ocp"><span class="tp-dot"></span>ERC-8281</span>
   <span class="tier-pill off" id="tier-vni"><span class="tp-dot"></span>VNI</span>
   <span class="tier-pill off" id="tier-onchain"><span class="tp-dot"></span>On-chain</span>
 </div>

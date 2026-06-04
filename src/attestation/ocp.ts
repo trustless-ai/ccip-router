@@ -1,6 +1,6 @@
 import { encodeAbiParameters, keccak256 } from 'viem'
 
-// OCP / ERC-8263 observation commitment
+// ERC-8281 (OCP) / ERC-8263 observation commitment
 // Binds the five fields that fully describe a single agent observation:
 // who (agentId), what model (modelHash), what input (inputHash),
 // what output (outputHash), and when (timestamp).

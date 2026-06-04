@@ -17,7 +17,7 @@ export type WyriweAttestation = {
   sanitizationPipelineHash: `0x${string}`  // bytes32 — sentinel or pipeline hash
   inputHash:                `0x${string}`  // bytes32 — keccak256(sanitized input)
   outputHash:               `0x${string}`  // bytes32 — keccak256(output)
-  commitmentHash:           `0x${string}`  // bytes32 — OCP ERC-8263 observation commitment
+  commitmentHash:           `0x${string}`  // bytes32 — ERC-8281 (OCP) / ERC-8263 observation commitment
   timestamp:                bigint
 }
 

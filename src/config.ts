@@ -13,7 +13,7 @@ export type Config = {
   agentId:         `0x${string}` | null
   registryAddress: `0x${string}` | null
   chainId:         number
-  // WYRIWE / OCP — optional, activates full attestation pipeline when combined with identity
+  // WYRIWE / ERC-8281 (OCP) — optional, activates full attestation pipeline when combined with identity
   modelHash:       `0x${string}` | null  // bytes32 AI model identifier (keccak256 of weights CID)
   // Phase 2 on-chain anchoring — optional
   attestationIndex: `0x${string}` | null  // deployed AttestationIndex contract

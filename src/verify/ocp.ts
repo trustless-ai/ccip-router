@@ -5,7 +5,7 @@ import { getConfig } from '../config.js'
 export const ocpRouter = new Hono()
 
 // GET /ocp/:inputHash
-// Returns the OCP ERC-8263 observation commitment for a given inputHash.
+// Returns the ERC-8281 (OCP) / ERC-8263 observation commitment for a given inputHash.
 // Lighter-weight than /verify — only returns the commitment hash and its
 // component fields, no signature recovery. Useful for on-chain Phase 2
 // lookups against AttestationIndex.sol.

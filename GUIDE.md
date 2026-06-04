@@ -11,7 +11,7 @@ A **CCIP-Read gateway** that:
 - Responds to EIP-3668 requests from any browser or smart contract
 - Signs every record with your gateway key
 - Syncs records with peer nodes automatically
-- Optionally produces cryptographic attestations for every resolver call (WYRIWE + OCP)
+- Optionally produces cryptographic attestations for every resolver call (WYRIWE + ERC-8281 (OCP))
 - Anchors those attestations on-chain to an immutable shared index
 
 You can run it as a **standalone node** (Docker / `npm run dev`) or embed `CcipRouter` into an existing Node.js server.
@@ -198,7 +198,7 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 
 | Contract | Address | Role |
 |---|---|---|
-| `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) | OCP-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
+| `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) | ERC-8281 (OCP)-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
 | `NodeRegistry` | [`0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D) | Public node directory |
 | `WyriweProofVerifier` | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) | ERC-8274 `IProofVerifier` |
 
@@ -206,7 +206,7 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 
 | Contract | Address | Role |
 |---|---|---|
-| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | OCP-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
+| `AttestationIndex` | [`0x107D706112225aC57eCf6692FBbDC283fb6E3698`](https://sepolia.etherscan.io/address/0x107D706112225aC57eCf6692FBbDC283fb6E3698) | ERC-8281 (OCP)-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
 | `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public node directory |
 | `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96#code) | ERC-8274 `IProofVerifier` |
 | `WyriweAttestationVerifier` *(deprecated)* | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier` — superseded |
@@ -217,9 +217,9 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 |---|---|---|
 | `TruthAnchorV1` | [`0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C`](https://sepolia.etherscan.io/address/0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C) | [`0xe95d6a15966984c209a62a2c188828555eb5ec3d`](https://etherscan.io/address/0xe95d6a15966984c209a62a2c188828555eb5ec3d) |
 
-`AttestationIndex` is a valid OCP-compatible anchor but is distinct from `TruthAnchorV1` — the canonical ERC-8263 contract (Vincent Wu) that emits `AnchorProof` with `agentIdScheme`. The two are separate primitives by design.
+`AttestationIndex` is a valid ERC-8281 (OCP)-compatible anchor but is distinct from `TruthAnchorV1` — the canonical ERC-8263 contract (Vincent Wu) that emits `AnchorProof` with `agentIdScheme`. The two are separate primitives by design.
 
-**How ccip-router connects to ERC-8263:** ccip-router anchors its `commitmentHash` as the `proofHash` in `TruthAnchorV1`. ERC-8263's `proofHash` is deliberately opaque — the same anchor layer serves OCP, WYRIWE, and zkML uniformly. ccip-router's `commitmentHash = keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))` is one canonical instantiation of it, not the definition. Full chain: gateway signs `WyriweAttestation` (producing `commitmentHash`) → `anchor(commitmentHash)` called on `TruthAnchorV1` as the `proofHash` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by `proofHash` topic (= your `commitmentHash`) via `eth_getLogs`. V1 is event-only by design — no per-anchor storage. A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
+**How ccip-router connects to ERC-8263:** ccip-router anchors its `commitmentHash` as the `proofHash` in `TruthAnchorV1`. ERC-8263's `proofHash` is deliberately opaque — the same anchor layer serves ERC-8281 (OCP), WYRIWE, and zkML uniformly. ccip-router's `commitmentHash = keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))` is one canonical instantiation of it, not the definition. Full chain: gateway signs `WyriweAttestation` (producing `commitmentHash`) → `anchor(commitmentHash)` called on `TruthAnchorV1` as the `proofHash` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by `proofHash` topic (= your `commitmentHash`) via `eth_getLogs`. V1 is event-only by design — no per-anchor storage. A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
 
 **Via env (mainnet):**
 
@@ -263,7 +263,7 @@ cast call 0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7 \
 # by inputHash — returns proofs from every namespace
 curl https://your-node.example.com/verify/0xINPUT_HASH | jq
 
-# OCP commitment hash
+# ERC-8281 (OCP) commitment hash
 curl https://your-node.example.com/ocp/0xINPUT_HASH | jq
 ```
 
@@ -314,7 +314,7 @@ Never use Hardhat dev keys (`0xac0974...`) outside local testing.
 | [EIP-712](https://eips.ethereum.org/EIPS/eip-712) | Structured `WyriweAttestation` signing via `withWyriwe()` |
 | [WYRIWE](https://github.com/TMerlini/wyriwe) | Input provenance — triple-hash chain, sentinel / non-sentinel paths |
 | [ERC-8004](https://github.com/ethereum/ERCs/pull/8004) | Agent identity — `agentId` + `registryAddress` in every attestation |
-| [OCP / ERC-8263](https://github.com/damonzwicker/observation-commitment-protocol) | Observation commitment — `commitmentHash` anchored on-chain |
+| [ERC-8281 (OCP)](https://github.com/damonzwicker/observation-commitment-protocol) / ERC-8263 | Observation commitment — `commitmentHash` anchored on-chain |
 | VNI | Verifiable node identity — EIP-191 signed `{ nodeId, signerAddress, url }` |
 | ERC-8275 | Contribution attribution — per-peer record counts at `GET /contributions` |
 

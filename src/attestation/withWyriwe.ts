@@ -59,7 +59,7 @@ export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
     // ── Output hash ────────────────────────────────────────────────────────
     const outputHash = keccak256(toBytes(response))
 
-    // ── OCP commitment hash (ERC-8263) ────────────────────────────────────
+    // ── ERC-8281 (OCP) commitment hash (ERC-8263) ─────────────────────────
     const timestamp = BigInt(Math.floor(Date.now() / 1000))
 
     const commitmentHash = buildCommitmentHash({
