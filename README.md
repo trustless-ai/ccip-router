@@ -108,12 +108,13 @@ graph TB
     S["EIP-191 · Record signing\nkeccak256(inputHash · namespace · valueHash · ts)"]
     W["WYRIWE · Input provenance\nsentinel path: inputHash = rawInputHash\nnon-sentinel: inputHash = keccak256(abi.encode(raw, pipelineHash))"]
     I["ERC-8004 · Agent identity\nagentId · registryAddress declared on-chain"]
-    O["ERC-8281 (OCP) / ERC-8263 · Observation commitment\ncommitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)\nccip-router anchors commitmentHash as proofHash in TruthAnchorV1"]
+    O["ERC-8281 (OCP) · Commitment shape\ncommitmentHash = keccak256(agentId · modelHash · inputHash · outputHash · ts)"]
+    P["ERC-8263 · On-chain anchor\ncommitmentHash → proofHash in TruthAnchorV1\nAnchorProof(agentIdScheme, agentId, proofHash, operator, aux)"]
     A["EIP-712 · WyriweAttestation\nstructured signing · verifiable by any peer · synced by mesh"]
     V["VNI · Node identity\nEIP-191 signed { nodeId · signerAddress · url · version · ts }"]
     C["On-chain anchoring · Sepolia\nAttestationIndex — signerOf · commitmentOf\nNodeRegistry — register(url, sig)"]
 
-    T --> S --> W --> I --> O --> A --> V --> C
+    T --> S --> W --> I --> O --> P --> A --> V --> C
 ```
 
 ---
@@ -439,7 +440,7 @@ Visit `/admin` after setup. Features:
 
 **Bearer fallback:** `Authorization: Bearer <ADMIN_SECRET>` always works for CLI / scripts regardless of SIWE state.
 
-**Stack status row:** A compact pill row below the header shows which tiers are active — Signing / ERC-8004 / WYRIWE / OCP / VNI / On-chain — derived from `/admin/api/status`. Green = active, grey = unconfigured.
+**Stack status row:** A compact pill row below the header shows which tiers are active — Signing / ERC-8004 / WYRIWE / ERC-8281 / ERC-8263 / VNI / On-chain — derived from `/admin/api/status`. Green = active, grey = unconfigured.
 
 **Node logs panel:** Live ring buffer of the last 200 log lines (info/warn/error), colour-coded. Auto-refreshes every 10 seconds.
 
@@ -617,7 +618,7 @@ POST /admin/logout              clear session cookie
 ```
 GET  /admin/api/status          node info, peers, recent records, tiers, adminAddress
 GET  /admin/api/logs            last 200 log lines [{ ts, level, msg }]
-GET  /admin/api/audit           per-spec compliance report (EIP-3668/WYRIWE/ERC-8004/OCP/VNI)
+GET  /admin/api/audit           per-spec compliance report (EIP-3668/WYRIWE/ERC-8004/ERC-8281/ERC-8263/VNI)
 POST /admin/api/sync            trigger immediate peer sync
 POST /admin/api/publish         batch-publish recent WYRIWE records to AttestationIndex
                                   body: { limit?: number }  (default 50, max 200)
@@ -668,7 +669,8 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 | EIP-3668 | Transport | CCIP-Read client-to-gateway | ✅ implemented |
 | WYRIWE | L2 Input trust | Triple-hash commitment, EIP-712 attestation | ✅ implemented |
 | ERC-8004 | L1 Identity | Agent identity `agentId` + `registryAddress` in attestation | ✅ implemented |
-| ERC-8281 (OCP) / ERC-8263 | L3 Observation | Observation commitment hash. `AttestationIndex` = ERC-8281-compatible anchor. Canonical ERC-8263 reference: `TruthAnchorV1` (Vincent Wu). | ✅ implemented |
+| ERC-8281 (OCP) | L3 Commitment shape | keccak envelope binding agent, model, input, output, timestamp. `AttestationIndex` = transport-layer store. `/ocp/:inputHash` endpoint. | ✅ implemented |
+| ERC-8263 | L3 On-chain anchor | `commitmentHash` carried as `proofHash` in `TruthAnchorV1` (Vincent Wu), emitting `AnchorProof`. The same opaque anchor layer serves OCP, WYRIWE, and zkML uniformly. | ✅ implemented |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
 | VNI | L5 Node Identity | Signed node identity, peer gossip | ✅ implemented |
 | ERC-8275 | L6 Economics | Contribution attribution (`/contributions` — per-peer record counts, foundation for usage-based node compensation) | ✅ implemented |
@@ -689,7 +691,8 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] `withWyriwe()` — EIP-712 attestation, triple-hash chain, IDENTITY_SENTINEL path
 - [x] `/verify` — clean proof per namespace: `{ verified, signer, signingType, signature, attestation }`
 - [x] ERC-8004 identity — `AGENT_ID` + `REGISTRY_ADDRESS` + `CHAIN_ID`, `/identity` endpoint, `/health` field
-- [x] ERC-8281 (OCP) / ERC-8263 — `commitmentHash` in `WyriweAttestation`, `/ocp/:inputHash` endpoint
+- [x] ERC-8281 (OCP) — `commitmentHash` in `WyriweAttestation`, `/ocp/:inputHash` endpoint
+- [x] ERC-8263 — `commitmentHash` as `proofHash` in `TruthAnchorV1`, `AnchorProof` event anchor layer
 - [x] Router SVG favicon, dinamic.eth design language
 - [x] Peer signer pinning — reject records with unexpected signer after first sync
 - [x] Peer health polling — fetch `/health` after every sync, populate `nodeVersion` + `signerAddress`
