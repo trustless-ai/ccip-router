@@ -264,16 +264,33 @@ adminRouter.get('/api/audit', async (c) => {
           ],
     },
     {
-      key: 'ocp', name: 'ERC-8281 (OCP) / ERC-8263', label: 'Observation Commitment',
+      key: 'ocp', name: 'ERC-8281 (OCP)', label: 'Observation Commitment',
       status: wyriweOn ? 'pass' : 'inactive',
-      description: 'Verifiable commitment linking agent, model, input, and output. Produced alongside every WYRIWE attestation.',
+      description: 'Commitment shape — keccak envelope binding agent, model, input, output, and timestamp into a single verifiable hash. Produced alongside every WYRIWE attestation.',
       details: wyriweOn
         ? [
             { k: 'Records',    v: String(wyriweCount) },
             { k: 'Endpoint',   v: '/ocp/:inputHash' },
-            { k: 'Commitment', v: 'keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))' },
-            { k: 'Contract',   v: chainOn ? config.attestationIndex! : 'not deployed — set ATTESTATION_INDEX' },
+            { k: 'Formula',    v: 'keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))' },
+            { k: 'Store',      v: chainOn ? config.attestationIndex! : 'not deployed — set ATTESTATION_INDEX' },
             { k: '/verify',    v: chainOn ? 'on-chain fallback active' : 'local DB only' },
+          ]
+        : [
+            { k: 'Missing',    v: 'Requires WYRIWE to be active', warn: true },
+            { k: 'Enable',     v: 'Enable WYRIWE first via withWyriwe() wrapper' },
+          ],
+    },
+    {
+      key: 'erc8263', name: 'ERC-8263', label: 'On-chain Anchor',
+      status: wyriweOn ? 'pass' : 'inactive',
+      description: 'Anchor/write layer — commitmentHash is carried as proofHash in TruthAnchorV1, emitting AnchorProof(agentIdScheme, agentId, proofHash, operator, aux). One valid instantiation of the opaque proofHash; the same anchor layer serves OCP, WYRIWE, and zkML uniformly.',
+      details: wyriweOn
+        ? [
+            { k: 'proofHash',  v: 'commitmentHash (ERC-8281 keccak envelope)' },
+            { k: 'Event',      v: 'AnchorProof(agentIdScheme, agentId, proofHash, operator, aux)' },
+            { k: 'TruthAnchorV1 (mainnet)', v: '0xe95d6a15966984c209a62a2c188828555eb5ec3d' },
+            { k: 'TruthAnchorV1 (Sepolia)', v: '0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C' },
+            { k: 'Author',     v: 'Vincent Wu' },
           ]
         : [
             { k: 'Missing',    v: 'Requires WYRIWE to be active', warn: true },
@@ -1410,6 +1427,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   <span class="tier-pill off" id="tier-erc8004"><span class="tp-dot"></span>ERC-8004</span>
   <span class="tier-pill off" id="tier-wyriwe"><span class="tp-dot"></span>WYRIWE</span>
   <span class="tier-pill off" id="tier-ocp"><span class="tp-dot"></span>ERC-8281</span>
+  <span class="tier-pill off" id="tier-erc8263"><span class="tp-dot"></span>ERC-8263</span>
   <span class="tier-pill off" id="tier-vni"><span class="tp-dot"></span>VNI</span>
   <span class="tier-pill off" id="tier-onchain"><span class="tp-dot"></span>On-chain</span>
 </div>
@@ -2291,6 +2309,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       setTier('tier-erc8004', d.tiers.erc8004)
       setTier('tier-wyriwe',  d.tiers.wyriwe)
       setTier('tier-ocp',     d.tiers.ocp)
+      setTier('tier-erc8263', d.tiers.ocp)
       setTier('tier-vni',     d.tiers.vni)
       setTier('tier-onchain', d.tiers.onChain)
     }

@@ -695,13 +695,13 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Peer health polling — fetch `/health` after every sync, populate `nodeVersion` + `signerAddress`
 - [x] Graceful shutdown — `SIGTERM`/`SIGINT` → `server.close()` → `db.close()` → `process.exit(0)`
 - [x] In-memory log ring buffer (200 lines, console-patched) → `/admin/api/logs` + colour-coded log panel
-- [x] Stack status pills in admin header bar — Signing / ERC-8004 / WYRIWE / ERC-8281
+- [x] Stack status pills in admin header bar — Signing / ERC-8004 / WYRIWE / ERC-8281 / ERC-8263
 - [x] Library re-export (`src/lib.ts`) — `CcipRouter`, `withWyriwe`, `IdentityOpts`, `WyriweOpts`, `ResolverFn`, DB types
 
 - [x] `withWyriwe()` non-sentinel path — `sanitizationCID` option; `inputHash = keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))`
 - [x] Setup wizard reconfigure flow — pre-fills current config, "Keep existing key", `/setup/current-config` endpoint, inherited admin secret
 
-- [x] Spec audit accordion panel in admin — per-spec cards (EIP-3668 / WYRIWE / ERC-8004 / ERC-8281), inline summary pills, expandable detail grid with missing-config hints
+- [x] Spec audit accordion panel in admin — per-spec cards (EIP-3668 / WYRIWE / ERC-8004 / ERC-8281 / ERC-8263), inline summary pills, expandable detail grid with missing-config hints
 - [x] `contracts/AttestationIndex.sol` — on-chain anchor for WyriweAttestations; verifies EIP-712 sig against ERC-8004 registry domain, stores `signerOf[commitmentHash]` + `commitmentOf[inputHash]`
 - [x] `src/chain/` — viem public + wallet clients, `publishAttestation()`, `checkOnChain()`
 - [x] `/verify` on-chain fallback — if `inputHash` not in local DB and `ATTESTATION_INDEX` + `RPC_URL` configured, queries contract and returns on-chain proof
