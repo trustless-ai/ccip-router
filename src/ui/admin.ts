@@ -21,7 +21,7 @@ export const adminRouter = new Hono()
 
 function restartProcess(): void {
   const [bin, ...args] = process.argv
-  const child = spawn(bin, args, { detached: true, stdio: 'inherit', env: process.env })
+  const child = spawn(bin, args, { detached: true, stdio: 'inherit', env: process.env, cwd: process.cwd() })
   child.unref()
   process.exit(0)
 }
