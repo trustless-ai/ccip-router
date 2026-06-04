@@ -2137,7 +2137,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
   function renderDiscoverNodes(nodes) {
     const list = document.getElementById('discover-list')
-    if (!nodes.length) {
+    if (!nodes?.length) {
       list.innerHTML = '<div class="empty" style="padding:12px 16px">No other nodes found in NodeRegistry.</div>'
       return
     }
@@ -2173,7 +2173,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
         btn.textContent = 'Connected'
         btn.style.color = 'var(--green)'
         btn.style.borderColor = 'var(--green)'
-        loadStatus()
+        load()
       } else {
         const { error } = await res.json()
         btn.textContent = error || 'Failed'
@@ -2266,7 +2266,9 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   async function load() {
     const res = await fetch('/admin/api/status')
     if (res.status === 401) { window.location.href = '/admin/login'; return }
+    if (!res.ok) return
     const d = await res.json()
+    if (!d || !Array.isArray(d.peers)) return
     window._statusData = d
 
     _signerAddress = d.signerAddress
@@ -2419,12 +2421,14 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   }
 
   function renderAuditSummary(specs) {
+    if (!specs?.length) return
     document.getElementById('audit-summary').innerHTML = specs.map(s => \`
       <span class="audit-mini-pill \${s.status}">\${s.name}</span>
     \`).join('')
   }
 
   function renderAuditGrid(specs) {
+    if (!specs?.length) return
     document.getElementById('audit-grid').innerHTML = specs.map(s => \`
       <div class="spec-card \${s.status}">
         <div class="spec-top">
@@ -2436,7 +2440,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
         </div>
         <div class="spec-desc">\${s.description}</div>
         <div class="spec-rows">
-          \${s.details.map(d => \`
+          \${(s.details ?? []).map(d => \`
             <div class="spec-row \${d.warn ? 'warn' : ''}">
               <span class="sk">\${d.k}</span>
               <span class="sv">\${d.v}</span>
@@ -2865,7 +2869,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       body: JSON.stringify({ ids: [id] }),
     })
     loadMessages()
-    loadStatus()
+    load()
   }
 
   async function markAllRead() {
@@ -2874,7 +2878,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       body: JSON.stringify({}),
     })
     loadMessages()
-    loadStatus()
+    load()
   }
 
   async function sendMessage() {
