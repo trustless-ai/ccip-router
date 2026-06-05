@@ -423,12 +423,13 @@ adminRouter.delete('/api/peers', async (c) => {
 // Discover peers from NodeRegistry — returns all registered nodes with health + already-added status.
 adminRouter.get('/api/peers/discover', async (c) => {
   const config = getConfig()
-  if (!config.nodeRegistry || !config.rpcUrl) {
-    return c.json({ error: 'NODE_REGISTRY and RPC_URL required for peer discovery' }, 400)
+  const registryAddr = config.nodeRegistry ?? config.registryAddress
+  if (!registryAddr || !config.rpcUrl) {
+    return c.json({ error: 'NODE_REGISTRY (or REGISTRY_ADDRESS) and RPC_URL required for peer discovery' }, 400)
   }
 
   const client  = getPublicClient(config.rpcUrl, config.chainId)
-  const address = config.nodeRegistry as `0x${string}`
+  const address = registryAddr as `0x${string}`
 
   let count: bigint
   let signers: `0x${string}`[]
