@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
-import { readFileSync } from 'node:fs'
+import { readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const BG_VIDEO = readFileSync(join(__dirname, '../../public/bg.mp4'))
+const BG_VIDEO_PATH = join(__dirname, '../../public/bg.mp4')
+const BG_VIDEO = existsSync(BG_VIDEO_PATH) ? readFileSync(BG_VIDEO_PATH) : null
 
 export const staticRouter = new Hono()
 
@@ -37,6 +38,7 @@ staticRouter.get('/favicon.svg', (c) => {
 })
 
 staticRouter.get('/bg.mp4', (c) => {
+  if (!BG_VIDEO) return c.notFound()
   c.header('Content-Type', 'video/mp4')
   c.header('Cache-Control', 'public, max-age=604800')
   return c.body(BG_VIDEO)

@@ -24,6 +24,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts=false
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/public ./public
 
 RUN mkdir -p /data
 
