@@ -1888,19 +1888,26 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
               <input class="cfg-input" type="text" id="ipfs-cid" placeholder="Qm... or bafy..."/>
             </div>
           </div>
-          <div class="cfg-field" style="margin-top:8px">
-            <label class="cfg-label">Network</label>
-            <div style="display:flex;gap:8px;align-items:stretch">
-              <select class="cfg-input" id="ipfs-chain" style="flex:1">
+          <div class="cfg-row-2" style="margin-top:8px">
+            <div class="cfg-field">
+              <label class="cfg-label">Network</label>
+              <select class="cfg-input" id="ipfs-chain">
                 <option value="1">Ethereum Mainnet</option>
                 <option value="11155111">Sepolia</option>
               </select>
-              <button class="cfg-save-btn" onclick="setContenthash()" id="ipfs-set-btn">Set via MetaMask</button>
             </div>
+            <div class="cfg-field">
+              <label class="cfg-label">Resolver address <span style="font-weight:400;color:var(--subtle)">(optional)</span></label>
+              <input class="cfg-input" type="text" id="ipfs-resolver" placeholder="0x231b0Ee… (default: ENS Public Resolver)"/>
+            </div>
+          </div>
+          <div style="margin-top:8px">
+            <button class="cfg-save-btn" onclick="setContenthash()" id="ipfs-set-btn">Set via MetaMask</button>
           </div>
           <div id="ipfs-set-status" style="font-size:12px;color:var(--subtle);margin-top:6px"></div>
           <div class="cfg-hint">
-            Calls <code style="font-family:var(--mono);font-size:11px">setContenthash(namehash, encode(CID))</code> on the ENS Public Resolver.
+            Calls <code style="font-family:var(--mono);font-size:11px">setContenthash(namehash, encode(CID))</code> on the resolver.
+            Leave resolver blank to use the ENS Public Resolver. Set a custom address for CCIP-Read resolvers (e.g. dinamic.eth).
             Also saves the record locally so CCIP-Read resolvers serve it dynamically.
           </div>
         </div>
@@ -2058,6 +2065,14 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       <p id="upgrade-msg" style="font-size:13px;color:var(--subtle);margin:0 0 12px"></p>
       <button class="btn btn-ghost btn-sm" id="btn-upgrade" onclick="upgradeNode()">↻ Check for update</button>
       <span id="upgrade-status" style="font-size:12px;color:var(--text-muted);margin-left:10px"></span>
+      <div style="margin-top:16px;padding:12px;background:var(--s2);border-radius:8px;font-size:12px;color:var(--subtle);line-height:1.7">
+        <div style="font-weight:600;color:var(--text);margin-bottom:6px">How updates are applied</div>
+        <div><span style="color:var(--green)">●</span> <strong>Docker + Watchtower</strong> — auto-pulls the latest image and restarts the container within 5 minutes. No action needed.</div>
+        <div style="margin-top:4px"><span style="color:var(--yellow,#f59e0b)">●</span> <strong>Docker without Watchtower</strong> — run <code style="background:var(--s1);padding:1px 4px;border-radius:3px">docker pull ghcr.io/echo-merlini/ccip-router:latest</code> then restart the container.</div>
+        <div style="margin-top:4px"><span style="color:var(--yellow,#f59e0b)">●</span> <strong>Railway / managed platforms</strong> — trigger a redeploy from the Railway dashboard. The latest image is pulled automatically on each deploy.</div>
+        <div style="margin-top:4px"><span style="color:var(--subtle)">●</span> <strong>npm global</strong> — run <code style="background:var(--s1);padding:1px 4px;border-radius:3px">npm update -g ccip-router</code> then restart the process.</div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border,rgba(255,255,255,0.07))">Updates preserve all records and configuration. The database is not affected by a version upgrade.</div>
+      </div>
     </div>
   </div>
 
@@ -3038,8 +3053,9 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       })
 
       const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' })
-      const resolver   = ENS_RESOLVERS[chainId]
-      if (!resolver) throw new Error('No known ENS resolver for chain ' + chainId)
+      const customResolver = document.getElementById('ipfs-resolver').value.trim()
+      const resolver = customResolver || ENS_RESOLVERS[chainId]
+      if (!resolver) throw new Error('No known ENS resolver for chain ' + chainId + '. Enter a custom resolver address.')
 
       status.textContent = 'Waiting for MetaMask confirmation…'
       const txHash = await window.ethereum.request({
