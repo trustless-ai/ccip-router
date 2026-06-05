@@ -16,6 +16,7 @@ import { startSyncCron } from './mesh/cron.js'
 import { peersRouter } from './mesh/records.js'
 import { makeVni } from './mesh/vni.js'
 import { messagesRouter } from './mesh/messages.js'
+import { keccak256, toBytes, recoverAddress, hashMessage } from 'viem'
 import { NODE_VERSION } from './version.js'
 import { setupRouter } from './ui/setup.js'
 import { adminRouter } from './ui/admin.js'
@@ -145,6 +146,44 @@ app.get('/contributions', async (c) => {
       records: c.count,
     })),
   })
+})
+
+// POST /join-request — public endpoint for new nodes to request mesh membership.
+// Recovers the signer from the EIP-191 signature, health-checks the node, and
+// stores the request for admin review. Approve in the admin panel → MetaMask → NodeRegistry.register().
+app.post('/join-request', async (c) => {
+  try {
+    const body = await c.req.json<{ url?: string; signature?: string }>()
+    const { url, signature } = body ?? {}
+    if (!url || !signature) return c.json({ error: 'url and signature required' }, 400)
+    if (!url.startsWith('http')) return c.json({ error: 'url must be http or https' }, 400)
+
+    const msgHash = keccak256(toBytes('ccip-router:node:' + url))
+    let signerAddress: string
+    try {
+      signerAddress = await recoverAddress({
+        hash:      hashMessage({ raw: msgHash as `0x${string}` }),
+        signature: signature as `0x${string}`,
+      })
+    } catch {
+      return c.json({ error: 'invalid signature — personal_sign keccak256("ccip-router:node:" + url) with the node key' }, 400)
+    }
+
+    let healthOk = false
+    let healthData: Record<string, unknown> | null = null
+    try {
+      const ac    = new AbortController()
+      const timer = setTimeout(() => ac.abort(), 4000)
+      const res   = await fetch(`${url}/health`, { signal: ac.signal }).finally(() => clearTimeout(timer))
+      if (res.ok) { healthData = await res.json() as Record<string, unknown>; healthOk = true }
+    } catch { /* unreachable node — still store the request */ }
+
+    const id = await db.upsertJoinRequest({ url, signature, signerAddress, status: 'pending', healthOk, healthData })
+    console.log(`[join-request] ${signerAddress} @ ${url} (health: ${healthOk})`)
+    return c.json({ ok: true, id, signerAddress })
+  } catch (err) {
+    return c.json({ error: `join request failed: ${(err as Error).message ?? String(err)}` }, 500)
+  }
 })
 
 app.route('/', ccip.hono())

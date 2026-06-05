@@ -71,4 +71,20 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_messages_read ON messages (read);
     `,
   },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE IF NOT EXISTS join_requests (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        url            TEXT    NOT NULL,
+        signature      TEXT    NOT NULL,
+        signer_address TEXT    NOT NULL,
+        status         TEXT    NOT NULL DEFAULT 'pending',
+        health_ok      INTEGER NOT NULL DEFAULT 0,
+        health_data    TEXT,
+        created_at     INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+        UNIQUE(signer_address)
+      );
+    `,
+  },
 ]

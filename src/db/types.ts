@@ -25,6 +25,17 @@ export type Contribution = {
   count:      number
 }
 
+export type JoinRequest = {
+  id:            number
+  url:           string
+  signature:     string
+  signerAddress: string
+  status:        'pending' | 'approved' | 'declined'
+  healthOk:      boolean
+  healthData:    Record<string, unknown> | null
+  createdAt:     number
+}
+
 export type MessageType = 'upgrade_notice' | 'deprecation' | 'network_announcement'
 
 export type Message = {
@@ -72,5 +83,9 @@ export interface DB {
   deleteNameRecord(name: string, type: string, coinType: number, textKey: string): Promise<void>
   getNameRecordValue(name: string, type: string, coinType?: number, textKey?: string): Promise<string | null>
   listNameRecords(name?: string): Promise<NameRecord[]>
+  // Join requests — soft governance for new node onboarding
+  upsertJoinRequest(req: Omit<JoinRequest, 'id' | 'createdAt'>): Promise<number>
+  getJoinRequests(status?: string): Promise<JoinRequest[]>
+  updateJoinRequestStatus(id: number, status: 'approved' | 'declined'): Promise<void>
   close(): void
 }

@@ -13,7 +13,7 @@ import { registerNode } from '../chain/register.js'
 import { getPublicClient } from '../chain/client.js'
 import { NODE_REGISTRY_ABI } from '../chain/abi.js'
 import { getCdnProvider } from '../cdn/index.js'
-import { namehash } from 'viem/ens'
+import { namehash, encodeFunctionData } from 'viem'
 import { NODE_VERSION } from '../version.js'
 import { broadcastMessage } from '../mesh/messages.js'
 
@@ -477,6 +477,59 @@ adminRouter.get('/api/peers/discover', async (c) => {
   } catch (err) {
     console.error('[discover] unhandled error:', err)
     return c.json({ error: `Discovery error: ${(err as Error).message ?? String(err)}` }, 500)
+  }
+})
+
+adminRouter.get('/api/join-requests', async (c) => {
+  try {
+    const status  = c.req.query('status') ?? 'pending'
+    const requests = await getDB().getJoinRequests(status || undefined)
+    return c.json({ requests })
+  } catch (err) {
+    return c.json({ error: (err as Error).message ?? String(err) }, 500)
+  }
+})
+
+adminRouter.post('/api/join-requests/:id/decline', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    if (isNaN(id)) return c.json({ error: 'invalid id' }, 400)
+    await getDB().updateJoinRequestStatus(id, 'declined')
+    return c.json({ ok: true })
+  } catch (err) {
+    return c.json({ error: (err as Error).message ?? String(err) }, 500)
+  }
+})
+
+adminRouter.post('/api/join-requests/:id/approve', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    if (isNaN(id)) return c.json({ error: 'invalid id' }, 400)
+    await getDB().updateJoinRequestStatus(id, 'approved')
+    return c.json({ ok: true })
+  } catch (err) {
+    return c.json({ error: (err as Error).message ?? String(err) }, 500)
+  }
+})
+
+adminRouter.get('/api/join-requests/:id/calldata', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'))
+    if (isNaN(id)) return c.json({ error: 'invalid id' }, 400)
+    const all = await getDB().getJoinRequests()
+    const req = all.find(r => r.id === id)
+    if (!req) return c.json({ error: 'request not found' }, 404)
+    const config       = getConfig()
+    const registryAddr = (config.nodeRegistry ?? config.registryAddress) as `0x${string}` | null
+    if (!registryAddr) return c.json({ error: 'registry address not configured on this node' }, 400)
+    const data = encodeFunctionData({
+      abi:          NODE_REGISTRY_ABI,
+      functionName: 'register',
+      args:         [req.url, req.signature as `0x${string}`],
+    })
+    return c.json({ to: registryAddr, data, chainId: config.chainId })
+  } catch (err) {
+    return c.json({ error: (err as Error).message ?? String(err) }, 500)
   }
 })
 
@@ -1502,6 +1555,17 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="panel" id="jr-panel">
+      <div class="panel-header">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="panel-title">Join Requests</div>
+          <span id="jr-badge" style="display:none;font-size:10px;background:var(--red,#ef4444);color:#fff;padding:1px 7px;border-radius:10px;font-weight:700;line-height:1.6"></span>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="loadJoinRequests()">↻</button>
+      </div>
+      <div id="jr-list"><div class="empty">Loading...</div></div>
+    </div>
+
     <div class="panel">
       <div class="panel-header">
         <div class="panel-title">Recent records</div>
@@ -2204,6 +2268,106 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     } catch (e) {
       btn.textContent = 'Error'
       btn.disabled = false
+    }
+  }
+
+  async function loadJoinRequests() {
+    const list  = document.getElementById('jr-list')
+    const badge = document.getElementById('jr-badge')
+    try {
+      const res  = await fetch('/admin/api/join-requests')
+      let data
+      try { data = await res.json() } catch { data = { requests: [] } }
+      const reqs = data.requests ?? []
+      if (badge) {
+        badge.textContent = String(reqs.length)
+        badge.style.display = reqs.length ? '' : 'none'
+      }
+      if (!reqs.length) {
+        list.innerHTML = \`<div class="empty">No pending join requests.<br><span style="font-size:11px;color:var(--subtle)">New nodes can post to POST /join-request to request membership.</span></div>\`
+        return
+      }
+      list.innerHTML = reqs.map(r => {
+        const tiers = r.healthData?.tiers
+        const tierBadges = tiers
+          ? Object.entries(tiers).map(([k, v]) =>
+              \`<span style="font-size:9px;padding:1px 5px;border-radius:3px;margin-right:2px;background:\${v ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'};color:\${v ? 'var(--green)' : 'var(--red)'}">\${k}</span>\`
+            ).join('')
+          : \`<span style="font-size:10px;color:var(--subtle)">health check failed</span>\`
+        return \`
+          <div class="peer-row" id="jr-row-\${r.id}">
+            <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:\${r.healthOk ? 'var(--green)' : 'var(--red)'};flex-shrink:0;margin-right:8px;margin-top:4px"></span>
+            <div class="peer-info" style="flex:1;min-width:0">
+              <div class="peer-url">\${r.url}</div>
+              <div class="peer-meta">\${trunc(r.signerAddress, 24)}\${r.healthData?.version ? ' · v' + r.healthData.version : ''}</div>
+              <div style="display:flex;gap:2px;flex-wrap:wrap;margin-top:4px">\${tierBadges}</div>
+            </div>
+            <div class="peer-actions" style="display:flex;gap:6px;align-items:flex-start;padding-top:2px">
+              <button class="btn btn-ghost btn-sm" style="color:var(--green);border-color:rgba(74,222,128,0.4)" onclick="approveJoinRequest(\${r.id}, this)">✓ Approve</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--red,#ef4444);border-color:rgba(248,113,113,0.4)" onclick="declineJoinRequest(\${r.id}, this)">✕ Decline</button>
+            </div>
+          </div>\`
+      }).join('')
+    } catch (e) {
+      list.innerHTML = \`<div class="empty" style="color:var(--red)">\${e.message}</div>\`
+    }
+  }
+
+  async function approveJoinRequest(id, btn) {
+    btn.disabled = true
+    btn.textContent = 'Preparing...'
+    try {
+      if (!window.ethereum) throw new Error('MetaMask not found')
+      const cdRes  = await fetch(\`/admin/api/join-requests/\${id}/calldata\`)
+      let cd
+      try { cd = await cdRes.json() } catch { throw new Error(\`Server error (HTTP \${cdRes.status})\`) }
+      if (!cdRes.ok) throw new Error(cd?.error || 'Failed to build calldata')
+
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: '0x' + cd.chainId.toString(16) }],
+      })
+      const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      btn.textContent = 'Confirm in MetaMask...'
+      const txHash = await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [{ from: account, to: cd.to, data: cd.data }],
+      })
+      await fetch(\`/admin/api/join-requests/\${id}/approve\`, { method: 'POST' })
+      btn.textContent = '✓ Sent'
+      btn.style.color = 'var(--green)'
+      btn.style.borderColor = 'var(--green)'
+      toast(\`Registration tx sent: \${txHash.slice(0,10)}...\`)
+      setTimeout(loadJoinRequests, 2000)
+    } catch (e) {
+      btn.disabled = false
+      btn.textContent = '✓ Approve'
+      toast('Approve failed: ' + (e.message || String(e)))
+    }
+  }
+
+  async function declineJoinRequest(id, btn) {
+    btn.disabled = true
+    btn.textContent = 'Declining...'
+    try {
+      const res = await fetch(\`/admin/api/join-requests/\${id}/decline\`, { method: 'POST' })
+      if (!res.ok) throw new Error('Decline failed')
+      document.getElementById(\`jr-row-\${id}\`)?.remove()
+      const remaining = document.querySelectorAll('[id^="jr-row-"]').length
+      if (!remaining) {
+        document.getElementById('jr-list').innerHTML = \`<div class="empty">No pending join requests.</div>\`
+      }
+      const badge = document.getElementById('jr-badge')
+      if (badge) {
+        const n = Math.max(0, parseInt(badge.textContent || '0') - 1)
+        badge.textContent = String(n)
+        badge.style.display = n ? '' : 'none'
+      }
+      toast('Request declined')
+    } catch (e) {
+      btn.disabled = false
+      btn.textContent = '✕ Decline'
+      toast('Decline failed: ' + (e.message || String(e)))
     }
   }
 
@@ -3364,8 +3528,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   load()
   loadLogs()
   loadAudit()
+  loadJoinRequests()
   setInterval(load, 15000)
   setInterval(loadLogs, 10000)
+  setInterval(loadJoinRequests, 30000)
   document.getElementById('peer-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') addPeer() })
 </script>
 </body>

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import { SCHEMA, MIGRATIONS } from './schema.js'
-import type { DB, MeshRecord, PeerState, Contribution, NameRecord, Message, MessageType } from './types.js'
+import type { DB, MeshRecord, PeerState, Contribution, NameRecord, Message, MessageType, JoinRequest } from './types.js'
 
 type EnsRow = {
   name:        string
@@ -27,6 +27,17 @@ type PeerRow = {
   healthy: number
   node_version: string | null
   signer_address: string | null
+}
+
+type JoinRequestRow = {
+  id:             number
+  url:            string
+  signature:      string
+  signer_address: string
+  status:         string
+  health_ok:      number
+  health_data:    string | null
+  created_at:     number
 }
 
 export class SQLiteDB implements DB {
@@ -57,6 +68,11 @@ export class SQLiteDB implements DB {
     msgMarkRead:    Database.Statement
     msgMarkAllRead: Database.Statement
     msgUnreadCount: Database.Statement
+    jrUpsert:       Database.Statement
+    jrList:         Database.Statement
+    jrListStatus:   Database.Statement
+    jrUpdateStatus: Database.Statement
+    jrGetById:      Database.Statement
   }
 
   constructor(path: string) {
@@ -200,6 +216,34 @@ export class SQLiteDB implements DB {
 
       msgUnreadCount: this.db.prepare(`
         SELECT COUNT(*) as count FROM messages WHERE read = 0
+      `),
+
+      jrUpsert: this.db.prepare(`
+        INSERT INTO join_requests (url, signature, signer_address, status, health_ok, health_data)
+        VALUES (@url, @signature, @signerAddress, @status, @healthOk, @healthData)
+        ON CONFLICT(signer_address) DO UPDATE SET
+          url         = excluded.url,
+          signature   = excluded.signature,
+          status      = excluded.status,
+          health_ok   = excluded.health_ok,
+          health_data = excluded.health_data,
+          created_at  = strftime('%s','now')
+      `),
+
+      jrList: this.db.prepare(`
+        SELECT * FROM join_requests ORDER BY created_at DESC
+      `),
+
+      jrListStatus: this.db.prepare(`
+        SELECT * FROM join_requests WHERE status = ? ORDER BY created_at DESC
+      `),
+
+      jrUpdateStatus: this.db.prepare(`
+        UPDATE join_requests SET status = ? WHERE id = ?
+      `),
+
+      jrGetById: this.db.prepare(`
+        SELECT id FROM join_requests WHERE signer_address = @signerAddress
       `),
     }
   }
@@ -379,6 +423,39 @@ export class SQLiteDB implements DB {
   async unreadMessageCount(): Promise<number> {
     const row = this.stmts.msgUnreadCount.get() as { count: number }
     return row.count
+  }
+
+  async upsertJoinRequest(req: Omit<JoinRequest, 'id' | 'createdAt'>): Promise<number> {
+    this.stmts.jrUpsert.run({
+      url:           req.url,
+      signature:     req.signature,
+      signerAddress: req.signerAddress,
+      status:        req.status,
+      healthOk:      req.healthOk ? 1 : 0,
+      healthData:    req.healthData ? JSON.stringify(req.healthData) : null,
+    })
+    const row = this.stmts.jrGetById.get({ signerAddress: req.signerAddress }) as { id: number }
+    return row.id
+  }
+
+  async getJoinRequests(status?: string): Promise<JoinRequest[]> {
+    const rows = (status
+      ? this.stmts.jrListStatus.all(status)
+      : this.stmts.jrList.all()) as JoinRequestRow[]
+    return rows.map(r => ({
+      id:            r.id,
+      url:           r.url,
+      signature:     r.signature,
+      signerAddress: r.signer_address,
+      status:        r.status as JoinRequest['status'],
+      healthOk:      r.health_ok === 1,
+      healthData:    r.health_data ? JSON.parse(r.health_data) as Record<string, unknown> : null,
+      createdAt:     r.created_at,
+    }))
+  }
+
+  async updateJoinRequestStatus(id: number, status: 'approved' | 'declined'): Promise<void> {
+    this.stmts.jrUpdateStatus.run(status, id)
   }
 
   close(): void {
