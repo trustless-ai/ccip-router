@@ -150,7 +150,7 @@ Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.ether
 | `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) |
 | `WyriweProofVerifier` | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) |
 
-Gateway nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their gateway key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Three dinamic.eth mesh nodes are registered: NAS (`0x58766f90...`), Railway (`0x2048eADf...`), and ENS Boiler (`0x85Fa1351...`).
+Gateway nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their gateway key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Four nodes are currently registered: NAS (`0x58766f90...`), Railway primary (`0x2048eADf...`), ENS Boiler (`0x85Fa1351...`), and Railway node 2 (`0x5e4F655f...`).
 
 Set `NODE_REGISTRY=0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D` on any mainnet node to enable on-chain registration via `POST /admin/api/register`.
 
@@ -306,19 +306,22 @@ Any CCIP-Read gateway that exposes `GET /records` in the mesh protocol format be
 
 ## Live network (dinamic.eth)
 
-Three production nodes serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014), forming a **bidirectional heterogeneous mesh**:
+Four nodes serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014), forming a **bidirectional heterogeneous mesh**:
 
 | Node | Role | URL | Signer | Tiers |
 |---|---|---|---|---|
 | ENS Boiler (primary) | 🟣 gateway | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, erc8004, wyriwe, ocp, vni, onChain |
 | NAS node | 🔵 router | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, ocp, vni, onChain |
-| Railway node | 🔵 router | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+| Railway node (primary) | 🔵 router | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, erc8004, wyriwe, ocp, vni, onChain |
+| Railway node 2 (Damon) | 🔵 router | `https://ccip-router-production-3506.up.railway.app/{sender}/{data}` | `0x5e4F655f…` | signed, erc8004, vni, onChain |
 
-ENS Boiler runs [ens-dynamic-kit](https://github.com/Echo-Merlini/ens-dynamic-kit) — a separate gateway stack. It participates in the mesh as a **gateway** peer: it exposes `GET /records` in the ccip-router mesh protocol, so router nodes pull its attestation records on every sync tick. All three nodes sync bidirectionally — records originating on any node propagate to all others within one sync interval.
+ENS Boiler runs [ens-dynamic-kit](https://github.com/Echo-Merlini/ens-dynamic-kit) — a separate gateway stack. It participates in the mesh as a **gateway** peer: it exposes `GET /records` in the ccip-router mesh protocol, so router nodes pull its attestation records on every sync tick. All nodes sync bidirectionally — records originating on any node propagate to all others within one sync interval.
 
-All three signers are authorized on the mainnet resolver. ENS clients try URLs in order — any live node produces a verifiable response.
+All registered signers are authorized on the mainnet resolver. ENS clients try URLs in order — any live node produces a verifiable response.
 
-All three nodes are registered in the mainnet [`NodeRegistry`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D). Each node's ERC-8004 identity uses its signer address as `agentId` — infrastructure identity, not a user-level NFT agent.
+All four nodes are registered in the mainnet [`NodeRegistry`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D). Each node's ERC-8004 identity uses its signer address as `agentId` — infrastructure identity, not a user-level NFT agent.
+
+**Mesh resilience in practice:** during a Railway SG3 storage outage (June 2026), the primary Railway node went offline entirely. The NAS node continued serving all 35 records with all 6 tiers green throughout the outage. The sync cron logged Railway as unreachable on every cycle and moved on — no manual intervention, no record loss, no downtime on the namespace. Railway came back and the mesh re-synced automatically. A single CCIP-Read gateway has no fallback; the mesh keeps serving as long as one node is up.
 
 ---
 
@@ -426,7 +429,11 @@ Visit `/admin` after setup. Features:
 - Manual sync trigger
 - Auto-refresh every 15 seconds
 
-**Peer discovery:** The peers panel has a **⊕ Discover** button that queries the on-chain `NodeRegistry` and lists all registered nodes not yet added as peers — with live health checks and one-click connect. Requires `NODE_REGISTRY` and `RPC_URL` to be configured.
+**Peer discovery:** The peers panel has a **⊕ Discover** button that queries the on-chain `NodeRegistry` and lists all registered nodes not yet added as peers — with live health checks and one-click connect. Requires `NODE_REGISTRY` or `REGISTRY_ADDRESS` and `RPC_URL` to be configured.
+
+**Join Requests:** New nodes that want to join the mesh can post a signed join request to `POST /join-request` on any known node. The admin panel shows pending requests in a **Join Requests** panel (polled every 30 s, red badge when pending). Approve → MetaMask → calls `NodeRegistry.register(url, sig)` on-chain. Decline drops the request. The on-chain registry remains permissionless — this is soft governance on top of it. See [Joining the mesh](#joining-the-mesh) below.
+
+**IPFS & browser resolution:** The IPFS panel supports an optional **Resolver address** field. Leave blank to use the ENS Public Resolver; fill in a custom address to target any resolver that implements `setContenthash(bytes32 node, bytes hash)` — e.g. a CCIP-Read resolver like `dinamic.eth`.
 
 **Header role badge:** A **ROUTER** / **GATEWAY** / **UNKNOWN** badge in the top-right header shows this node's role derived from its version string — same colour scheme as the peers panel badges.
 
@@ -582,6 +589,15 @@ GET /contributions
 → { namespace, contributions: [{ source, records }] }
 ```
 
+### Join request (new node onboarding)
+```
+POST /join-request
+  body: { url: string, signature: string }
+  signature: personal_sign of keccak256("ccip-router:node:" + url) with the node's gateway key
+  → { ok: true, id, signerAddress }   (stored as pending, visible in admin panel)
+  → { error }                          (invalid signature, unreachable URL, etc.)
+```
+
 ### Health
 ```
 GET /health
@@ -634,8 +650,43 @@ POST /admin/api/key             { gatewayKey } — rotate signing key → restar
 POST /admin/api/register        register node on-chain via NodeRegistry
 GET  /admin/api/peers/discover  query NodeRegistry for registered nodes not yet added as peers
                                   → { nodes: [{ url, signerAddress, healthy, role, version, alreadyPeer }] }
-                                  requires NODE_REGISTRY + RPC_URL
+                                  requires NODE_REGISTRY (or REGISTRY_ADDRESS) + RPC_URL
+GET  /admin/api/join-requests   list join requests  ?status=pending|approved|declined (default: pending)
+                                  → { requests: [{ id, url, signerAddress, status, healthOk, healthData, createdAt }] }
+GET  /admin/api/join-requests/:id/calldata
+                                  encode NodeRegistry.register(url, sig) for MetaMask
+                                  → { to, data, chainId }
+POST /admin/api/join-requests/:id/approve   mark as approved (call after MetaMask tx sent)
+POST /admin/api/join-requests/:id/decline   mark as declined, hide from pending list
 ```
+
+---
+
+## Joining the mesh
+
+Any node can request to join by posting a signed message to an existing node. No ETH required — the existing node's admin submits the on-chain registration tx.
+
+```bash
+# 1. Generate the signature (sign keccak256("ccip-router:node:" + url) with your gateway key)
+node -e "
+const { keccak256, toBytes } = require('viem')
+const { privateKeyToAccount } = require('viem/accounts')
+const url = 'https://my-node.example.com'
+const acc = privateKeyToAccount('0x<GATEWAY_PRIVATE_KEY>')
+const hash = keccak256(toBytes('ccip-router:node:' + url))
+acc.signMessage({ message: { raw: hash } }).then(sig => console.log(JSON.stringify({ url, signature: sig })))
+"
+
+# 2. POST to any known mesh node
+curl -X POST https://ccip-router-production.up.railway.app/join-request \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://my-node.example.com","signature":"0x..."}'
+# → { "ok": true, "id": 1, "signerAddress": "0x..." }
+```
+
+The admin of any receiving node will see the request in their **Join Requests** panel. On approval, MetaMask submits `NodeRegistry.register(url, sig)` — the recovering the signer from the signature means any relayer can submit without ETH in your hot key.
+
+**Soft governance caveat:** the on-chain `NodeRegistry.register()` is permissionless — any node can also call it directly, bypassing the request flow. Hard on-chain quorum enforcement (N-of-N approval gate) is planned for a future contract upgrade.
 
 ---
 
@@ -757,6 +808,13 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Heterogeneous mesh — any stack implementing the `/records` protocol joins the mesh regardless of language or runtime
 - [x] Peer discovery from NodeRegistry — "⊕ Discover" button in peers panel queries `NodeRegistry` on-chain and lists registered nodes not yet added, with health check + one-click connect
 - [x] Role badge in admin header — ROUTER / GATEWAY / UNKNOWN derived from node's own version, replaces namespace pill
+- [x] 4th mesh node registered on mainnet NodeRegistry — bidirectional sync verified
+- [x] Peer discovery fall-through — `REGISTRY_ADDRESS` accepted as fallback when `NODE_REGISTRY` is unset
+- [x] Join request flow — `POST /join-request` (public) + admin Join Requests panel; approve → MetaMask → `NodeRegistry.register()`; soft governance layer over permissionless registry
+- [x] DB migration v4 — `join_requests` table (unique on `signer_address`, status lifecycle)
+- [x] IPFS panel custom resolver field — optional; falls back to ENS Public Resolver; enables `setContenthash` on any CCIP-Read resolver (e.g. dinamic.eth)
+- [x] Version panel update guidance — Watchtower / Docker / Railway / npm paths documented inline
+- [x] Recent records panel spans full grid width; scrollbar transparent track
 
 ---
 
