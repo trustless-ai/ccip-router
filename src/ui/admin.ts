@@ -785,6 +785,20 @@ const SHARED_CSS = /* css */`
     font-family: 'Poppins', sans-serif;
     font-size: 14px; font-weight: 400; line-height: 1.5;
     min-height: 100vh;
+    position: relative;
+  }
+
+  #bg-video {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; z-index: -2; opacity: 0.18;
+    pointer-events: none;
+  }
+
+  body::after {
+    content: ''; position: fixed; inset: 0; z-index: -1;
+    background: var(--bg);
+    opacity: 0.72;
+    pointer-events: none;
   }
 `
 
@@ -1271,7 +1285,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
     /* ── Node info ── */
     .node-bar {
-      margin-top: 18px;
+      margin-top: 18px; margin-bottom: 18px;
       background: var(--s1); border: 1px solid var(--border);
       border-radius: 14px; padding: 16px 22px;
       display: flex; gap: 32px; flex-wrap: wrap; align-items: center;
@@ -1476,6 +1490,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   </style>
 </head>
 <body>
+
+<video id="bg-video" autoplay muted loop playsinline>
+  <source src="https://sapphire-naval-quelea-174.mypinata.cloud/ipfs/bafybeibm2jdz7lyhefdolp5s3miu46mmjirxyrw2qm52vios5uezbpo32i" type="video/mp4">
+</video>
 
 <header>
   <div class="logo">
