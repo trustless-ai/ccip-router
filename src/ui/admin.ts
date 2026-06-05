@@ -422,57 +422,62 @@ adminRouter.delete('/api/peers', async (c) => {
 
 // Discover peers from NodeRegistry — returns all registered nodes with health + already-added status.
 adminRouter.get('/api/peers/discover', async (c) => {
-  const config = getConfig()
-  const registryAddr = config.nodeRegistry ?? config.registryAddress
-  if (!registryAddr || !config.rpcUrl) {
-    return c.json({ error: 'NODE_REGISTRY (or REGISTRY_ADDRESS) and RPC_URL required for peer discovery' }, 400)
-  }
-
-  const client  = getPublicClient(config.rpcUrl, config.chainId)
-  const address = registryAddr as `0x${string}`
-
-  let count: bigint
-  let signers: `0x${string}`[]
-  let urls: string[]
   try {
-    count = await client.readContract({ address, abi: NODE_REGISTRY_ABI, functionName: 'nodeCount' }) as bigint
-    if (count === 0n) return c.json({ nodes: [] })
-    ;({ signers, urls } = await client.readContract({
-      address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
-      args: [0n, count > 50n ? 50n : count],
-    }) as unknown as { signers: `0x${string}`[]; urls: string[]; timestamps: bigint[] })
-  } catch (err) {
-    console.error('[discover] contract read failed:', err)
-    return c.json({ error: `Registry read failed: ${(err as Error).message ?? err}` }, 502)
-  }
+    const config = getConfig()
+    const registryAddr = config.nodeRegistry ?? config.registryAddress
+    if (!registryAddr || !config.rpcUrl) {
+      return c.json({ error: 'NODE_REGISTRY (or REGISTRY_ADDRESS) and RPC_URL required for peer discovery' }, 400)
+    }
 
-  const existingUrls = new Set((await getDB().getPeers()).map(p => p.url.toLowerCase()))
-  const ownUrl = config.nodeUrl?.toLowerCase()
+    const client  = getPublicClient(config.rpcUrl, config.chainId)
+    const address = registryAddr as `0x${string}`
 
-  const nodes = await Promise.all(
-    urls.map(async (url, i) => {
-      if (!url || (ownUrl && url.toLowerCase() === ownUrl)) return null
-      const signerAddress = signers[i]
-      const alreadyPeer   = existingUrls.has(url.toLowerCase())
-      try {
-        const ac    = new AbortController()
-        const timer = setTimeout(() => ac.abort(), 3000)
-        const res   = await fetch(`${url}/health`, { signal: ac.signal }).finally(() => clearTimeout(timer))
-        const h     = await res.json() as Record<string, unknown>
-        if (h.listed === false) return null
-        return {
-          url, signerAddress, alreadyPeer, healthy: true,
-          role:    (h.role as string) ?? ((h.version && /^\d+\.\d+/.test(h.version as string)) ? 'router' : 'gateway'),
-          version: (h.version as string) ?? null,
-          tiers:   (h.tiers as Record<string, boolean>) ?? null,
+    let count: bigint
+    let signers: `0x${string}`[]
+    let urls: string[]
+    try {
+      count = await client.readContract({ address, abi: NODE_REGISTRY_ABI, functionName: 'nodeCount' }) as bigint
+      if (count === 0n) return c.json({ nodes: [] })
+      ;({ signers, urls } = await client.readContract({
+        address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
+        args: [0n, count > 50n ? 50n : count],
+      }) as unknown as { signers: `0x${string}`[]; urls: string[]; timestamps: bigint[] })
+    } catch (err) {
+      console.error('[discover] contract read failed:', err)
+      return c.json({ error: `Registry read failed: ${(err as Error).message ?? err}` }, 502)
+    }
+
+    const existingUrls = new Set((await getDB().getPeers()).map(p => p.url.toLowerCase()))
+    const ownUrl = config.nodeUrl?.toLowerCase()
+
+    const nodes = await Promise.all(
+      urls.map(async (url, i) => {
+        if (!url || (ownUrl && url.toLowerCase() === ownUrl)) return null
+        const signerAddress = signers[i]
+        const alreadyPeer   = existingUrls.has(url.toLowerCase())
+        try {
+          const ac    = new AbortController()
+          const timer = setTimeout(() => ac.abort(), 3000)
+          const res   = await fetch(`${url}/health`, { signal: ac.signal }).finally(() => clearTimeout(timer))
+          const h     = await res.json() as Record<string, unknown>
+          if (h.listed === false) return null
+          return {
+            url, signerAddress, alreadyPeer, healthy: true,
+            role:    (h.role as string) ?? ((h.version && /^\d+\.\d+/.test(h.version as string)) ? 'router' : 'gateway'),
+            version: (h.version as string) ?? null,
+            tiers:   (h.tiers as Record<string, boolean>) ?? null,
+          }
+        } catch {
+          return { url, signerAddress, alreadyPeer, healthy: false, role: 'unknown', version: null, tiers: null }
         }
-      } catch {
-        return { url, signerAddress, alreadyPeer, healthy: false, role: 'unknown', version: null, tiers: null }
-      }
-    })
-  )
+      })
+    )
 
-  return c.json({ nodes: nodes.filter(Boolean) })
+    return c.json({ nodes: nodes.filter(Boolean) })
+  } catch (err) {
+    console.error('[discover] unhandled error:', err)
+    return c.json({ error: `Discovery error: ${(err as Error).message ?? String(err)}` }, 500)
+  }
 })
 
 adminRouter.get('/api/config', (c) => {
@@ -2137,7 +2142,8 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     section.style.display = 'block'
     try {
       const res  = await fetch('/admin/api/peers/discover')
-      const data = await res.json()
+      let data
+      try { data = await res.json() } catch { data = { error: \`Server error (HTTP \${res.status})\` } }
       if (!res.ok) {
         list.innerHTML = \`<div class="empty" style="padding:12px 16px;color:var(--red)">\${data.error || 'Discovery failed'}</div>\`
         return
