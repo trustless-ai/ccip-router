@@ -169,7 +169,8 @@ adminRouter.get('/api/status', async (c) => {
       signed:   !!signerAddress,
       erc8004:  !!(config.agentId && config.registryAddress),
       wyriwe:   !!(config.gatewayKey && config.agentId && config.registryAddress && config.modelHash),
-      ocp:      !!(config.gatewayKey && config.agentId && config.registryAddress && config.modelHash),
+      erc8281:  !!(config.gatewayKey && config.agentId && config.registryAddress && config.modelHash),
+      ocp:      !!(config.gatewayKey && config.agentId && config.registryAddress && config.modelHash), // backwards compat
       vni:      !!(config.gatewayKey && config.nodeUrl),
       onChain:  !!(config.attestationIndex && config.rpcUrl),
     },
@@ -2534,8 +2535,8 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       setTier('tier-signed',  d.tiers.signed)
       setTier('tier-erc8004', d.tiers.erc8004)
       setTier('tier-wyriwe',  d.tiers.wyriwe)
-      setTier('tier-ocp',     d.tiers.ocp)
-      setTier('tier-erc8263', d.tiers.ocp)
+      setTier('tier-ocp',     d.tiers.erc8281 ?? d.tiers.ocp)
+      setTier('tier-erc8263', d.tiers.erc8281 ?? d.tiers.ocp)
       setTier('tier-vni',     d.tiers.vni)
       setTier('tier-onchain', d.tiers.onChain)
     }
