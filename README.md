@@ -150,11 +150,11 @@ Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.ether
 | `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) |
 | `WyriweProofVerifier` | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) |
 
-Gateway nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their gateway key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Four nodes are currently registered: NAS (`0x58766f90...`), Railway primary (`0x2048eADf...`), ENS Boiler (`0x85Fa1351...`), and Railway node 2 (`0x5e4F655f...`).
+Nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their signing key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Four nodes are currently registered: NAS (`0x58766f90...`), Railway primary (`0x2048eADf...`), ENS Boiler (`0x85Fa1351...`), and Damon's node (`0x5e4F655f...`).
 
 Set `NODE_REGISTRY=0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D` on any mainnet node to enable on-chain registration via `POST /admin/api/register`.
 
-**ERC-8004 identity via NodeRegistry:** Set `AGENT_ID` to your node's signer address padded to bytes32, `REGISTRY_ADDRESS` to the NodeRegistry address, and `MODEL_HASH` to `keccak256("ccip-router:<name>:<nodeUrl>")`. This gives each gateway node its own verifiable infrastructure identity — distinct from user-level ERC-8004 agent tokens.
+**ERC-8004 identity via NodeRegistry:** Set `AGENT_ID` to your node's signer address padded to bytes32, `REGISTRY_ADDRESS` to the NodeRegistry address, and `MODEL_HASH` to `keccak256("ccip-router:<name>:<nodeUrl>")`. This gives each router node its own verifiable infrastructure identity — distinct from user-level ERC-8004 agent tokens.
 
 ```env
 # NAS node example
@@ -172,7 +172,7 @@ EIP-3668 wildcard resolver with multi-signer support. Replaces the single `signe
 |---|---|
 | `OffchainResolver` v2 | [`0xB300e09e6C4f901409B809e7924CF68A2A429014`](https://etherscan.io/address/0xB300e09e6C4f901409B809e7924CF68A2A429014) |
 
-`dinamic.eth` is pointed at this contract. Three signers are authorized — one per active gateway node. If any node is down the ENS client falls back to the next URL automatically.
+`dinamic.eth` is pointed at this contract. Four signers are authorized — one per active mesh node (router or gateway). If any node is down the ENS client falls back to the next URL automatically.
 
 Source: [`contracts/OffchainResolver.sol`](contracts/OffchainResolver.sol)
 
@@ -310,10 +310,10 @@ Four nodes serving `dinamic.eth` via [`OffchainResolver v2`](https://etherscan.i
 
 | Node | Role | URL | Signer | Tiers |
 |---|---|---|---|---|
-| ENS Boiler (primary) | 🟣 gateway | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, erc8004, wyriwe, ocp, vni, onChain |
-| NAS node | 🔵 router | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, ocp, vni, onChain |
-| Railway node (primary) | 🔵 router | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, erc8004, wyriwe, ocp, vni, onChain |
-| Railway node 2 (Damon) | 🔵 router | `https://ccip-router-production-3506.up.railway.app/{sender}/{data}` | `0x5e4F655f…` | signed, erc8004, vni, onChain |
+| ENS Boiler | 🟣 gateway node | `https://gateway.ensub.org/lookup/{sender}/{data}` | `0x85Fa1351…` | signed, erc8004, wyriwe, erc8281, vni, onChain |
+| NAS node | 🔵 router node | `https://gateway.gen-plasma.com/{sender}/{data}` | `0x58766f90…` | signed, erc8004, wyriwe, erc8281, vni, onChain |
+| Railway node | 🔵 router node | `https://ccip-router-production.up.railway.app/{sender}/{data}` | `0x2048eADf…` | signed, erc8004, wyriwe, erc8281, vni, onChain |
+| Damon's node | 🔵 router node | `https://ccip-router-production-3506.up.railway.app/{sender}/{data}` | `0x5e4F655f…` | signed, erc8004, vni, onChain |
 
 ENS Boiler runs [ens-dynamic-kit](https://github.com/Echo-Merlini/ens-dynamic-kit) — a separate gateway stack. It participates in the mesh as a **gateway** peer: it exposes `GET /records` in the ccip-router mesh protocol, so router nodes pull its attestation records on every sync tick. All nodes sync bidirectionally — records originating on any node propagate to all others within one sync interval.
 
