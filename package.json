@@ -1,6 +1,6 @@
 {
   "name": "ccip-router",
-  "version": "0.5.21",
+  "version": "0.5.22",
   "description": "The coordination layer CCIP-Read was missing. Peer sync, deduplication, and cryptographic attestation for any CCIP-Read gateway.",
   "type": "module",
   "main": "./dist/lib.js",

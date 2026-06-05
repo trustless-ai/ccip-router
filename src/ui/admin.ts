@@ -1257,6 +1257,9 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     .record-row:last-child { border-bottom: none; }
     .record-row:hover { background: rgba(255,255,255,0.02); }
     #records-list { max-height: 420px; overflow-y: auto; }
+    #records-list::-webkit-scrollbar { width: 4px; }
+    #records-list::-webkit-scrollbar-track { background: transparent; }
+    #records-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
     .record-hash   { font-family: var(--mono); color: var(--indigo); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
     .record-source { font-size: 10px; flex-shrink: 0; padding: 2px 7px; border-radius: 5px; }
@@ -1569,7 +1572,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       <div id="jr-list"><div class="empty">Loading...</div></div>
     </div>
 
-    <div class="panel">
+    <div class="panel" style="grid-column: 1 / -1">
       <div class="panel-header">
         <div class="panel-title">Recent records</div>
       </div>
