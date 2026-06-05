@@ -1531,7 +1531,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       <div class="stat-sub" id="s-ns-sub">—</div>
     </div>
     <div class="stat">
-      <div class="stat-label">Peers</div>
+      <div class="stat-label">Mesh nodes</div>
       <div class="stat-value" id="s-peers">—</div>
       <div class="stat-sub" id="s-healthy">—</div>
     </div>
@@ -2489,8 +2489,8 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 
     document.getElementById('s-records').textContent  = d.records
     document.getElementById('s-ns-sub').textContent   = d.namespace
-    document.getElementById('s-peers').textContent    = d.peers.length
-    document.getElementById('s-healthy').textContent  = d.peers.filter(p=>p.healthy).length + ' healthy'
+    document.getElementById('s-peers').textContent    = d.peers.length + 1
+    document.getElementById('s-healthy').textContent  = d.peers.filter(p=>p.healthy).length + ' peers + this node'
 
     const syncs = d.peers.map(p=>p.lastSyncAt).filter(Boolean)
     document.getElementById('s-sync').textContent     = syncs.length ? rel(Math.max(...syncs)) : 'never'
