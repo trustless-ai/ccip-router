@@ -72,5 +72,10 @@
   "engines": {
     "node": ">=20"
   },
+  "author": "Tiago Merlini <merloproductions@gmail.com> (https://github.com/TMerlini)",
+  "contributors": [
+    "Damon Zwicker (https://github.com/damonzwicker)",
+    "Vincent Wu (https://github.com/vincent-wu-eth)"
+  ],
   "license": "MIT"
 }

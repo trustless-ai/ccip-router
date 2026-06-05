@@ -859,4 +859,5 @@ Tests use `SQLiteDB(':memory:')` directly (bypassing the runtime singleton) and 
 
 ---
 
-*dinamic.eth*
+**Author:** Tiago Merlini — [dinamic.eth](https://github.com/TMerlini)
+**Co-authors:** Damon Zwicker (OCP / ERC-8281) · Vincent Wu (ERC-8263 / ERC-8004)
