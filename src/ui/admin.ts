@@ -438,10 +438,13 @@ adminRouter.get('/api/peers/discover', async (c) => {
     try {
       count = await client.readContract({ address, abi: NODE_REGISTRY_ABI, functionName: 'nodeCount' }) as bigint
       if (count === 0n) return c.json({ nodes: [] })
-      ;({ signers, urls } = await client.readContract({
+      // viem returns a tuple [signers, urls, timestamps] for multi-output functions
+      const result = await client.readContract({
         address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
         args: [0n, count > 50n ? 50n : count],
-      }) as unknown as { signers: `0x${string}`[]; urls: string[]; timestamps: bigint[] })
+      }) as unknown as [`0x${string}`[], string[], bigint[]]
+      signers = result[0]
+      urls    = result[1]
     } catch (err) {
       console.error('[discover] contract read failed:', err)
       return c.json({ error: `Registry read failed: ${(err as Error).message ?? err}` }, 502)
