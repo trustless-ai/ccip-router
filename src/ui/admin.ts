@@ -1492,7 +1492,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
 <body>
 
 <video id="bg-video" autoplay muted loop playsinline>
-  <source src="https://sapphire-naval-quelea-174.mypinata.cloud/ipfs/bafybeibm2jdz7lyhefdolp5s3miu46mmjirxyrw2qm52vios5uezbpo32i" type="video/mp4">
+  <source src="/bg.mp4" type="video/mp4">
 </video>
 
 <header>

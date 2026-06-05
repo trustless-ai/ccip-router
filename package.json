@@ -30,7 +30,8 @@
     "contracts/NodeRegistry.sol",
     "contracts/WyriweProofVerifier.sol",
     "contracts/WyriweAttestationVerifier.sol",
-    "contracts/OffchainResolver.sol"
+    "contracts/OffchainResolver.sol",
+    "public"
   ],
   "keywords": [
     "ccip-read",

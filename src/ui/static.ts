@@ -1,4 +1,10 @@
 import { Hono } from 'hono'
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const BG_VIDEO = readFileSync(join(__dirname, '../../public/bg.mp4'))
 
 export const staticRouter = new Hono()
 
@@ -28,4 +34,10 @@ staticRouter.get('/favicon.svg', (c) => {
   c.header('Content-Type', 'image/svg+xml')
   c.header('Cache-Control', 'public, max-age=86400')
   return c.body(FAVICON_SVG)
+})
+
+staticRouter.get('/bg.mp4', (c) => {
+  c.header('Content-Type', 'video/mp4')
+  c.header('Cache-Control', 'public, max-age=604800')
+  return c.body(BG_VIDEO)
 })
