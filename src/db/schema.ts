@@ -87,4 +87,13 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       );
     `,
   },
+  {
+    version: 5,
+    sql: `
+      CREATE TABLE IF NOT EXISTS peer_blocklist (
+        url        TEXT    PRIMARY KEY,
+        blocked_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+      );
+    `,
+  },
 ]

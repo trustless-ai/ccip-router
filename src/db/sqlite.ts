@@ -73,6 +73,8 @@ export class SQLiteDB implements DB {
     jrListStatus:   Database.Statement
     jrUpdateStatus: Database.Statement
     jrGetById:      Database.Statement
+    blockPeer:      Database.Statement
+    isBlockedPeer:  Database.Statement
   }
 
   constructor(path: string) {
@@ -244,6 +246,14 @@ export class SQLiteDB implements DB {
 
       jrGetById: this.db.prepare(`
         SELECT id FROM join_requests WHERE signer_address = @signerAddress
+      `),
+
+      blockPeer: this.db.prepare(`
+        INSERT OR IGNORE INTO peer_blocklist (url) VALUES (?)
+      `),
+
+      isBlockedPeer: this.db.prepare(`
+        SELECT 1 FROM peer_blocklist WHERE url = ?
       `),
     }
   }
@@ -423,6 +433,14 @@ export class SQLiteDB implements DB {
   async unreadMessageCount(): Promise<number> {
     const row = this.stmts.msgUnreadCount.get() as { count: number }
     return row.count
+  }
+
+  async blockPeer(url: string): Promise<void> {
+    this.stmts.blockPeer.run(url.replace(/\/$/, ''))
+  }
+
+  async isBlockedPeer(url: string): Promise<boolean> {
+    return !!this.stmts.isBlockedPeer.get(url.replace(/\/$/, ''))
   }
 
   async upsertJoinRequest(req: Omit<JoinRequest, 'id' | 'createdAt'>): Promise<number> {

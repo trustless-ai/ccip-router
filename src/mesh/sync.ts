@@ -255,6 +255,7 @@ async function discoverPeers(peer: PeerState, db: DB, nodeUrl?: string): Promise
       if (selfNorm && norm === selfNorm) continue  // never add self as peer
       if (existing.has(norm)) continue
       const url = discovered.url.replace(/\/$/, '')
+      if (await db.isBlockedPeer(url)) continue    // respect manual removals
       await db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: discovered.signerAddress })
       existing.add(norm)  // prevent double-add within same cycle
       added++

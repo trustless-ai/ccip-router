@@ -417,6 +417,7 @@ adminRouter.delete('/api/peers', async (c) => {
   const { url } = await c.req.json<{ url: string }>()
   if (!url) return c.json({ error: 'url required' }, 400)
   await getDB().removePeer(url)
+  await getDB().blockPeer(url)  // prevent auto-discover from re-seeding this URL
   return c.json({ ok: true })
 })
 

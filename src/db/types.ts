@@ -70,6 +70,8 @@ export interface DB {
   getContributions(namespace: string): Promise<Contribution[]>
   upsertPeer(peer: PeerState): Promise<void>
   removePeer(url: string): Promise<void>
+  blockPeer(url: string): Promise<void>
+  isBlockedPeer(url: string): Promise<boolean>
   getPeers(): Promise<PeerState[]>
   recordCount(namespace: string): Promise<number>
   ensNameCount(): Promise<number>
