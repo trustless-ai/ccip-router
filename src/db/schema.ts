@@ -96,4 +96,19 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       );
     `,
   },
+  {
+    version: 6,
+    sql: `
+      CREATE TABLE IF NOT EXISTS snapshots (
+        period_id       INTEGER PRIMARY KEY,
+        snapshot_cutoff INTEGER NOT NULL DEFAULT 0,
+        frozen_at       INTEGER,
+        row_count       INTEGER,
+        snapshot_root   TEXT,
+        commitment_hash TEXT,
+        node_address    TEXT,
+        status          TEXT    NOT NULL DEFAULT 'pending'
+      );
+    `,
+  },
 ]

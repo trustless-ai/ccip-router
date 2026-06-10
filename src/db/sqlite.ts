@@ -75,6 +75,11 @@ export class SQLiteDB implements DB {
     jrGetById:      Database.Statement
     blockPeer:      Database.Statement
     isBlockedPeer:  Database.Statement
+    contributionsWithAddrs: Database.Statement
+    snapshotGet:             Database.Statement
+    snapshotInsert:          Database.Statement
+    snapshotFreeze:          Database.Statement
+    snapshotSetStatus:       Database.Statement
   }
 
   constructor(path: string) {
@@ -254,6 +259,34 @@ export class SQLiteDB implements DB {
 
       isBlockedPeer: this.db.prepare(`
         SELECT 1 FROM peer_blocklist WHERE url = ?
+      contributionsWithAddrs: this.db.prepare(`
+        SELECT r.source_peer, COUNT(*) as count, p.signer_address
+        FROM records r
+        LEFT JOIN peers p ON r.source_peer = p.url
+        WHERE r.namespace = ?
+        GROUP BY r.source_peer
+        ORDER BY count DESC
+      `),
+
+      snapshotGet: this.db.prepare(`
+        SELECT * FROM snapshots WHERE period_id = ?
+      `),
+
+      snapshotInsert: this.db.prepare(`
+        INSERT OR IGNORE INTO snapshots (period_id, snapshot_cutoff, status)
+        VALUES (?, ?, 'pending')
+      `),
+
+      snapshotFreeze: this.db.prepare(`
+        UPDATE snapshots
+        SET frozen_at = @frozenAt, row_count = @rowCount,
+            snapshot_root = @snapshotRoot, commitment_hash = @commitmentHash,
+            node_address = @nodeAddress, status = 'frozen'
+        WHERE period_id = @periodId AND status = 'pending'
+      `),
+
+      snapshotSetStatus: this.db.prepare(`
+        UPDATE snapshots SET status = ? WHERE period_id = ?
       `),
     }
   }
@@ -474,6 +507,33 @@ export class SQLiteDB implements DB {
 
   async updateJoinRequestStatus(id: number, status: 'approved' | 'declined'): Promise<void> {
     this.stmts.jrUpdateStatus.run(status, id)
+  async getContributionsWithAddresses(namespace: string): Promise<{ sourcePeer: string | null; count: number; signerAddress: string | null }[]> {
+    const rows = this.stmts.contributionsWithAddrs.all(namespace) as { source_peer: string | null; count: number; signer_address: string | null }[]
+    return rows.map((r) => ({ sourcePeer: r.source_peer, count: r.count, signerAddress: r.signer_address }))
+  }
+
+  async getSnapshot(periodId: number): Promise<SnapshotDbRow | null> {
+    const row = this.stmts.snapshotGet.get(periodId) as SnapshotDbRow | undefined
+    return row ?? null
+  }
+
+  async ensureSnapshot(periodId: number, snapshotCutoff: number): Promise<void> {
+    this.stmts.snapshotInsert.run(periodId, snapshotCutoff)
+  }
+
+  async freezeSnapshot(
+    periodId: number,
+    frozenAt: number,
+    rowCount: number,
+    snapshotRoot: string,
+    commitmentHash: string,
+    nodeAddress: string,
+  ): Promise<void> {
+    this.stmts.snapshotFreeze.run({ periodId, frozenAt, rowCount, snapshotRoot, commitmentHash, nodeAddress })
+  }
+
+  async updateSnapshotStatus(periodId: number, status: string): Promise<void> {
+    this.stmts.snapshotSetStatus.run(status, periodId)
   }
 
   close(): void {
@@ -501,6 +561,17 @@ function toPeerState(row: PeerRow): PeerState {
     nodeVersion:   row.node_version,
     signerAddress: row.signer_address,
   }
+}
+
+type SnapshotDbRow = {
+  period_id:       number
+  snapshot_cutoff: number
+  frozen_at:       number | null
+  row_count:       number | null
+  snapshot_root:   string | null
+  commitment_hash: string | null
+  node_address:    string | null
+  status:          'pending' | 'frozen' | 'committed' | 'revealed'
 }
 
 type MessageRow = {

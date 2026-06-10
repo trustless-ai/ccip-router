@@ -20,6 +20,7 @@ import { keccak256, toBytes, recoverAddress, hashMessage } from 'viem'
 import { NODE_VERSION } from './version.js'
 import { setupRouter } from './ui/setup.js'
 import { adminRouter } from './ui/admin.js'
+import { computeSnapshotRoot, computeCommitmentHash } from './crypto/hash.js'
 import { staticRouter } from './ui/static.js'
 
 const app = new Hono()
@@ -184,6 +185,82 @@ app.post('/join-request', async (c) => {
   } catch (err) {
     return c.json({ error: `join request failed: ${(err as Error).message ?? String(err)}` }, 500)
   }
+function toSnapshotResponse(s: {
+  period_id:       number
+  snapshot_cutoff: number
+  frozen_at:       number | null
+  row_count:       number | null
+  snapshot_root:   string | null
+  commitment_hash: string | null
+  node_address:    string | null
+  status:          string
+}) {
+  return {
+    periodId:       s.period_id,
+    snapshotCutoff: s.snapshot_cutoff,
+    frozenAt:       s.frozen_at,
+    rowCount:       s.row_count,
+    snapshotRoot:   s.snapshot_root,
+    commitmentHash: s.commitment_hash,
+    nodeAddress:    s.node_address,
+    status:         s.status,
+  }
+}
+
+const FREEZE_BUFFER = 600
+
+// POST /contributions/snapshot/freeze — ERC-8275 Layer 2 freeze (idempotent)
+app.post('/contributions/snapshot/freeze', async (c) => {
+  const body = await c.req.json().catch(() => ({}))
+  const periodId = Number(body.periodId)
+  if (!periodId || isNaN(periodId)) return c.json({ error: 'periodId required' }, 400)
+
+  const epochClose  = body.epochClose ? Number(body.epochClose) : null
+  const cutoff      = epochClose ? epochClose - FREEZE_BUFFER : 0
+  const now         = Math.floor(Date.now() / 1000)
+
+  if (now < cutoff) {
+    return c.json({ status: 'pending', periodId, snapshotCutoff: cutoff, now,
+                    message: 'snapshotCutoff not yet reached' }, 200)
+  }
+
+  await db.ensureSnapshot(periodId, cutoff)
+  const existing = await db.getSnapshot(periodId)
+  if (existing && existing.status !== 'pending') return c.json(toSnapshotResponse(existing), 200)
+
+  if (!signerAddress) return c.json({ error: 'GATEWAY_PRIVATE_KEY required for snapshots' }, 503)
+
+  const contribs = await db.getContributionsWithAddresses(config.syncNamespace)
+  const rows = contribs
+    .map((r: { sourcePeer: string | null; count: number; signerAddress: string | null }) => ({
+      contributor: (r.signerAddress ?? signerAddress) as `0x${string}`,
+      score:       BigInt(r.count),
+      timestamp:   BigInt(now),
+    }))
+    .sort((a: { contributor: string }, b: { contributor: string }) => a.contributor.toLowerCase() < b.contributor.toLowerCase() ? -1 : 1)
+
+  const snapshotRoot   = computeSnapshotRoot(rows)
+  const commitmentHash = computeCommitmentHash(snapshotRoot, BigInt(periodId), signerAddress)
+
+  await db.freezeSnapshot(periodId, now, rows.length, snapshotRoot, commitmentHash, signerAddress)
+  const frozen = await db.getSnapshot(periodId)
+  return c.json(toSnapshotResponse(frozen!))
+})
+
+// GET /contributions/snapshot?period=N — read snapshot state without triggering freeze
+app.get('/contributions/snapshot', async (c) => {
+  const period = c.req.query('period')
+  if (!period) return c.json({ error: 'period query param required' }, 400)
+  const periodId = Number(period)
+  if (isNaN(periodId)) return c.json({ error: 'invalid period' }, 400)
+
+  const snap = await db.getSnapshot(periodId)
+  if (!snap) {
+    return c.json({ periodId, status: 'pending', snapshotCutoff: null,
+                    frozenAt: null, rowCount: null, snapshotRoot: null,
+                    commitmentHash: null, nodeAddress: null }, 200)
+  }
+  return c.json(toSnapshotResponse(snap))
 })
 
 app.route('/', ccip.hono())

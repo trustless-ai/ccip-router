@@ -89,5 +89,11 @@ export interface DB {
   upsertJoinRequest(req: Omit<JoinRequest, 'id' | 'createdAt'>): Promise<number>
   getJoinRequests(status?: string): Promise<JoinRequest[]>
   updateJoinRequestStatus(id: number, status: 'approved' | 'declined'): Promise<void>
+  // ERC-8275 Layer 2 — contribution snapshots
+  getContributionsWithAddresses(namespace: string): Promise<{ sourcePeer: string | null; count: number; signerAddress: string | null }[]>
+  getSnapshot(periodId: number): Promise<{ period_id: number; snapshot_cutoff: number; frozen_at: number | null; row_count: number | null; snapshot_root: string | null; commitment_hash: string | null; node_address: string | null; status: string } | null>
+  ensureSnapshot(periodId: number, snapshotCutoff: number): Promise<void>
+  freezeSnapshot(periodId: number, frozenAt: number, rowCount: number, snapshotRoot: string, commitmentHash: string, nodeAddress: string): Promise<void>
+  updateSnapshotStatus(periodId: number, status: string): Promise<void>
   close(): void
 }
