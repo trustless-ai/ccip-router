@@ -130,9 +130,10 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 | `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96#code) | ERC-8274 `IProofVerifier` implementation. `verify(inputHash, outputHash, abi.encode(agentId, registry), abi.encode(modelHash, rawInputHash, sanitizationPipelineHash, commitmentHash, timestamp, sig))` — recomputes ERC-8281 (OCP) commitment, recovers signer, returns bool. No external calls. |
 | `WyriweAttestationVerifier` *(deprecated)* | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier`. Superseded by `WyriweProofVerifier`. |
 | `CommitRevealSettler` (V1) | [`0xc972F18CaD3c58F754ad24a977C46463B368411a`](https://sepolia.etherscan.io/address/0xc972F18CaD3c58F754ad24a977C46463B368411a#code) | ERC-8275 Layer 2 on-chain settlement (no bonds). Superseded by V2. |
-| `CommitRevealSettlerV2` | [`0x5e2e0007F5371e96035CFBab75d5d8db5875A267`](https://sepolia.etherscan.io/address/0x5e2e0007F5371e96035CFBab75d5d8db5875A267#code) | ERC-8275 Layer 2 — bond/slash settlement. Adds `BOND_AMOUNT` (0.01 ETH) at commit (Router+Hybrid only via NodeRegistryV2), `REVEAL_WINDOW` (48h), `CHALLENGE_PERIOD` (7d), `slashUnrevealed()`, and `challenge(periodId, nodeAddress, bytes4 proofType, bytes proofData)`. Slash recipient: deployer (→ EscrowV1 on mainnet). |
+| `CommitRevealSettlerV2` | [`0x3001a91418c6aA75daD4093AC9e57277e2c81eDC`](https://sepolia.etherscan.io/address/0x3001a91418c6aA75daD4093AC9e57277e2c81eDC#code) | ERC-8275 Layer 2 — bond/slash settlement. Adds `BOND_AMOUNT` (0.01 ETH) at commit (Router+Hybrid only via NodeRegistryV2), `REVEAL_WINDOW` (48h), `CHALLENGE_PERIOD` (7d), `slashUnrevealed()`, and `challenge(periodId, nodeAddress, bytes4 proofType, bytes proofData)`. Slash recipient: `EscrowV1` (`0x18165265aDBA40054792929D89c6C487Ae2242E9`). |
 | `GenericCommitRevealSettler` | [`0xFe7Ab6d95f7567a311B98D029373d0fc1511aCCe`](https://sepolia.etherscan.io/address/0xFe7Ab6d95f7567a311B98D029373d0fc1511aCCe#code) | Bytes-generic commit/reveal primitive. Accepts any record type — contribution snapshots, judgment attestations (WYRIWE L4), OCP observations. No NodeType gate or bond. `commitmentHash = keccak256(abi.encode(record, periodId, committer))`. Schema discrimination is off-chain via EIP-712 type strings. |
 | `NodeRegistryV2` *(pending group sign-off)* | [`0xeFae266aE0a74518da320a029dD76F4d47e2a87b`](https://sepolia.etherscan.io/address/0xeFae266aE0a74518da320a029dD76F4d47e2a87b#code) | ERC-8275 node registry extended with `enum NodeType { Origin, Router, Hybrid }`. `EscrowV1` reads `nodeType` at settlement time to route payouts to the correct reward pool. Breaking change to `NodeRegistry.register()` — bundled with next mainnet contract revision pending group sign-off. |
+| `EscrowV1` | [`0x18165265aDBA40054792929D89c6C487Ae2242E9`](https://sepolia.etherscan.io/address/0x18165265aDBA40054792929D89c6C487Ae2242E9#code) | ERC-8275 trust-minimized escrow. `createOrder` locks ETH or ERC-20; `confirmOrder` releases to agent; `disputeOrder` freezes funds; `resolveDispute` (arbitrator: 0=refund, 1=release, 2=split); `refundExpiredOrder` permissionless after deadline. Accumulates `CommitRevealSettlerV2` slash proceeds in `slashPool` via `receive()`. `agentId = bytes32(uint160(agentAddress))` — NodeRegistryV2-compatible. |
 
 **ERC-8263 canonical reference contract** (Vincent Wu, not ccip-router):
 
@@ -184,7 +185,7 @@ Source: [`contracts/OffchainResolver.sol`](contracts/OffchainResolver.sol)
 
 **To deploy to another chain:** open the admin panel → Deploy contracts → select the chain → connect wallet → three transactions (one per contract). No private key is stored — MetaMask signs everything in-browser.
 
-Source: [`contracts/AttestationIndex.sol`](contracts/AttestationIndex.sol) · [`contracts/NodeRegistry.sol`](contracts/NodeRegistry.sol) · [`contracts/NodeRegistryV2.sol`](contracts/NodeRegistryV2.sol) · [`contracts/CommitRevealSettler.sol`](contracts/CommitRevealSettler.sol) · [`contracts/CommitRevealSettlerV2.sol`](contracts/CommitRevealSettlerV2.sol) · [`contracts/GenericCommitRevealSettler.sol`](contracts/GenericCommitRevealSettler.sol) · [`contracts/IProofVerifier.sol`](contracts/IProofVerifier.sol) · [`contracts/WyriweProofVerifier.sol`](contracts/WyriweProofVerifier.sol)
+Source: [`contracts/AttestationIndex.sol`](contracts/AttestationIndex.sol) · [`contracts/NodeRegistry.sol`](contracts/NodeRegistry.sol) · [`contracts/NodeRegistryV2.sol`](contracts/NodeRegistryV2.sol) · [`contracts/CommitRevealSettler.sol`](contracts/CommitRevealSettler.sol) · [`contracts/CommitRevealSettlerV2.sol`](contracts/CommitRevealSettlerV2.sol) · [`contracts/GenericCommitRevealSettler.sol`](contracts/GenericCommitRevealSettler.sol) · [`contracts/EscrowV1.sol`](contracts/EscrowV1.sol) · [`contracts/IAgentEscrow.sol`](contracts/IAgentEscrow.sol) · [`contracts/IProofVerifier.sol`](contracts/IProofVerifier.sol) · [`contracts/WyriweProofVerifier.sol`](contracts/WyriweProofVerifier.sol)
 
 ---
 
@@ -606,7 +607,7 @@ POST /contributions/snapshot/freeze
 Freeze is idempotent. Status lifecycle: `pending -> frozen -> committed -> revealed`.
 
 **On-chain settlement (Sepolia):** after freeze, call `CommitRevealSettler.submitCommit(periodId, commitmentHash)` using the `commitmentHash` from the freeze response, then `submitReveal(periodId, rows[])` to verify on-chain.
-CommitRevealSettlerV2: [`0x5e2e0007F5371e96035CFBab75d5d8db5875A267`](https://sepolia.etherscan.io/address/0x5e2e0007F5371e96035CFBab75d5d8db5875A267#code) (Sepolia, verified) — requires 0.01 ETH bond at `submitCommit`, Router+Hybrid nodes only
+CommitRevealSettlerV2: [`0x3001a91418c6aA75daD4093AC9e57277e2c81eDC`](https://sepolia.etherscan.io/address/0x3001a91418c6aA75daD4093AC9e57277e2c81eDC#code) (Sepolia, verified) — requires 0.01 ETH bond at `submitCommit`, Router+Hybrid nodes only; slash recipient: EscrowV1
 
 ### Join request (new node onboarding)
 ```
@@ -837,6 +838,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] Recent records panel spans full grid width; scrollbar transparent track
 - [x] **v0.6.1** — `NodeRegistryV2` integration: `NODE_REGISTRY_V2` env var, `NODE_REGISTRY_V2_ABI` + `NodeType` enum in `abi.ts`, `registerNodeV2()`, `/api/register` branches on V2, `/api/peers/discover` reads 4-tuple `[signers, urls, nodeTypes, timestamps]`; `nodeType` in peer response; `CommitRevealSettlerV2` deployed Sepolia (`0x5e2e0007F5371e96035CFBab75d5d8db5875A267`) — bond/slash, Router+Hybrid gate; `GenericCommitRevealSettler` deployed Sepolia (`0xFe7Ab6d95f7567a311B98D029373d0fc1511aCCe`) — bytes-generic commit/reveal for WYRIWE L4, OCP, ERC-8275
 - [x] **v0.6.2** — `NODE_TYPE` env var: nodes declare their own type for `NodeRegistryV2` registration (`0`=Origin, `1`=Router default, `2`=Hybrid), prevents Origin nodes registering as Router; CI always pushes `latest` tag to GHCR on branch push
+- [x] **v0.6.3** — `EscrowV1` deployed Sepolia (`0x18165265aDBA40054792929D89c6C487Ae2242E9`, verified): ERC-8275 trust-minimized escrow — createOrder / confirmOrder / disputeOrder / resolveDispute / refundExpiredOrder; slash pool accumulator for `CommitRevealSettlerV2`; `IAgentEscrow` interface added
 
 ---
 
