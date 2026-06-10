@@ -145,6 +145,8 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 
 **How ccip-router connects to ERC-8263:** ccip-router anchors its `commitmentHash` as the `proofHash` in `TruthAnchorV1`. ERC-8263's `proofHash` is deliberately opaque — the same anchor layer serves OCP, WYRIWE, and zkML uniformly. ccip-router's `commitmentHash = keccak256(abi.encode(agentId, modelHash, inputHash, outputHash, timestamp))` is one canonical instantiation of it, not the definition. Full chain: inference runs → gateway signs `WyriweAttestation` (producing `commitmentHash`) → `anchor(commitmentHash)` called on `TruthAnchorV1` as the `proofHash` → `AnchorProof` event emitted. To verify L3 anchoring, filter `AnchorProof` by the `proofHash` topic (= your `commitmentHash`) and compare the anchoring block's timestamp against your execution time. V1 is event-only by design (no per-anchor storage cost). A synchronous on-chain view (`IAnchorReader`) is proposed for ERC-8263 v0.3.
 
+To activate: set `TRUTH_ANCHOR_ADDRESS` to the appropriate network address (see env vars table). The admin panel spec audit card for ERC-8263 shows `⚠ Partial` when WYRIWE is active but `TRUTH_ANCHOR_ADDRESS` is not yet configured, and `✓ Pass` once both are live. The publish toast also reports how many `AnchorProof` events were emitted alongside the `AttestationIndex` count.
+
 Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.etherscan.io/address/0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14) · Solc 0.8.24 · optimizer 200 runs.
 
 ### Mainnet contracts
