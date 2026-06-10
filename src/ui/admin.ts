@@ -2172,6 +2172,65 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     </div>
   </div>
 
+  <div class="audit-panel" id="snapshot-panel" style="margin-top:16px">
+    <div class="audit-header" id="snapshot-header" onclick="toggleSnapshotPanel()">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="panel-title">Snapshots — ERC-8275 Layer 2</div>
+        <span class="tier-pill off" id="snapshot-status-pill" style="font-size:10px;padding:2px 10px">
+          <span class="tp-dot"></span><span id="snapshot-status-text">—</span>
+        </span>
+      </div>
+      <span class="audit-chevron" id="snapshot-chevron">▼</span>
+    </div>
+    <div id="snapshot-body" style="display:none">
+      <div class="config-form">
+        <div class="config-section">
+          <div class="config-section-title">Freeze period</div>
+          <div class="cfg-row-2">
+            <div class="cfg-field">
+              <label class="cfg-label">Period ID</label>
+              <input class="cfg-input" type="number" id="snap-period" placeholder="1" min="1" value="1"/>
+            </div>
+            <div class="cfg-field">
+              <label class="cfg-label">Epoch close (unix ts, optional)</label>
+              <input class="cfg-input" type="text" id="snap-epoch-close" placeholder="leave blank to freeze immediately"/>
+            </div>
+          </div>
+          <div class="btn-row" style="margin-top:12px">
+            <button class="btn btn-ghost btn-sm" onclick="loadSnapshot()">↻ Load</button>
+            <button class="btn btn-primary btn-sm" id="btn-snap-freeze" onclick="freezeSnapshot()">❄ Freeze</button>
+          </div>
+          <div class="msg error" id="snap-err" style="margin-top:10px;display:none"></div>
+        </div>
+        <div class="config-section" id="snap-result-section" style="display:none">
+          <div class="config-section-title">Snapshot state</div>
+          <div id="snap-stepper" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:18px;font-size:11px"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="cfg-field"><label class="cfg-label">Period ID</label><div class="cfg-readonly" id="snap-d-period">—</div></div>
+            <div class="cfg-field"><label class="cfg-label">Row count</label><div class="cfg-readonly" id="snap-d-rows">—</div></div>
+            <div class="cfg-field"><label class="cfg-label">Snapshot cutoff</label><div class="cfg-readonly" id="snap-d-cutoff">—</div></div>
+            <div class="cfg-field"><label class="cfg-label">Frozen at</label><div class="cfg-readonly" id="snap-d-frozen">—</div></div>
+            <div class="cfg-field" style="grid-column:1/-1">
+              <label class="cfg-label">Snapshot root</label>
+              <div class="cfg-readonly" id="snap-d-root" style="font-family:var(--mono);font-size:11px;word-break:break-all">—</div>
+            </div>
+            <div class="cfg-field" style="grid-column:1/-1">
+              <label class="cfg-label">Commitment hash — submit to CommitRevealSettler</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="cfg-readonly" id="snap-d-hash" style="font-family:var(--mono);font-size:11px;word-break:break-all;flex:1">—</div>
+                <button class="btn btn-ghost btn-sm" onclick="copyCommitmentHash()" id="btn-copy-hash">Copy</button>
+              </div>
+            </div>
+            <div class="cfg-field" style="grid-column:1/-1">
+              <label class="cfg-label">Node address</label>
+              <div class="cfg-readonly" id="snap-d-node" style="font-family:var(--mono);font-size:11px">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <div class="toast" id="toast"></div>
@@ -3549,6 +3608,78 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       if (receipt?.contractAddress) return receipt.contractAddress
     }
     throw new Error('Timed out waiting for receipt')
+  }
+
+  let _snapPanelOpen = false
+  function toggleSnapshotPanel() {
+    _snapPanelOpen = !_snapPanelOpen
+    document.getElementById('snapshot-body').style.display = _snapPanelOpen ? 'block' : 'none'
+    document.getElementById('snapshot-chevron').style.transform = _snapPanelOpen ? 'rotate(180deg)' : ''
+    if (_snapPanelOpen) loadSnapshot()
+  }
+  async function loadSnapshot() {
+    const period = document.getElementById('snap-period').value || '1'
+    const errEl  = document.getElementById('snap-err')
+    errEl.style.display = 'none'
+    try {
+      const res = await fetch('/contributions/snapshot?period=' + period)
+      const d   = await res.json()
+      if (!res.ok || d.error) { document.getElementById('snap-result-section').style.display = 'none'; return }
+      renderSnapshot(d)
+    } catch (err) { errEl.textContent = err.message || String(err); errEl.style.display = 'block' }
+  }
+  async function freezeSnapshot() {
+    const period     = document.getElementById('snap-period').value
+    const epochClose = document.getElementById('snap-epoch-close').value.trim()
+    const btn        = document.getElementById('btn-snap-freeze')
+    const errEl      = document.getElementById('snap-err')
+    if (!period) { errEl.textContent = 'Period ID required'; errEl.style.display = 'block'; return }
+    errEl.style.display = 'none'
+    btn.disabled = true; btn.textContent = '⏳ Freezing...'
+    try {
+      const body = { periodId: period }
+      if (epochClose) body.epochClose = epochClose
+      const res = await fetch('/contributions/snapshot/freeze', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const d = await res.json()
+      if (!res.ok || d.error) throw new Error(d.error || 'freeze failed')
+      renderSnapshot(d)
+      toast('Snapshot frozen')
+    } catch (err) { errEl.textContent = err.message || String(err); errEl.style.display = 'block'
+    } finally { btn.disabled = false; btn.textContent = '❄ Freeze' }
+  }
+  function renderSnapshot(d) {
+    const STEPS = ['pending', 'frozen', 'committed', 'revealed']
+    const idx   = STEPS.indexOf(d.status)
+    document.getElementById('snap-stepper').innerHTML = STEPS.map((s, i) => {
+      const current = i === idx, done = i < idx
+      const color  = current ? 'var(--accent)' : done ? 'var(--green)' : 'var(--muted)'
+      const bg     = current ? 'var(--accent-l)' : done ? 'var(--green-l)' : 'var(--s2)'
+      const border = current ? 'var(--accent-b)' : done ? 'var(--green-b)' : 'var(--border)'
+      return '<span style="background:' + bg + ';border:1px solid ' + border + ';color:' + color + ';padding:3px 12px;border-radius:20px">' + s + '</span>'
+        + (i < STEPS.length - 1 ? '<span style="color:var(--border);padding:0 2px">→</span>' : '')
+    }).join('')
+    const pill = document.getElementById('snapshot-status-pill')
+    pill.className = 'tier-pill ' + (d.status === 'pending' ? 'off' : 'on')
+    document.getElementById('snapshot-status-text').textContent = 'period ' + d.periodId + ' — ' + d.status
+    document.getElementById('snap-d-period').textContent  = d.periodId != null ? String(d.periodId) : '—'
+    document.getElementById('snap-d-rows').textContent    = d.rowCount  != null ? d.rowCount + ' contributors' : '—'
+    document.getElementById('snap-d-cutoff').textContent  = d.snapshotCutoff ? new Date(d.snapshotCutoff * 1000).toISOString() : 'immediate'
+    document.getElementById('snap-d-frozen').textContent  = d.frozenAt  ? new Date(d.frozenAt  * 1000).toISOString() : '—'
+    document.getElementById('snap-d-root').textContent    = d.snapshotRoot   || '—'
+    document.getElementById('snap-d-hash').textContent    = d.commitmentHash || '—'
+    document.getElementById('snap-d-node').textContent    = d.nodeAddress    || '—'
+    document.getElementById('snap-result-section').style.display = 'block'
+  }
+  function copyCommitmentHash() {
+    const hash = document.getElementById('snap-d-hash').textContent
+    if (!hash || hash === '—') return
+    navigator.clipboard.writeText(hash).then(() => {
+      const btn = document.getElementById('btn-copy-hash')
+      btn.textContent = 'Copied!'; setTimeout(() => { btn.textContent = 'Copy' }, 1500)
+    })
   }
 
   load()
