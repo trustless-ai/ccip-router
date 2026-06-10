@@ -22,6 +22,7 @@ export type Config = {
   nodeUrl:          string | null          // this node's public URL (for VNI + NodeRegistry)
   nodeRegistry:     `0x${string}` | null  // deployed NodeRegistry contract (V1)
   nodeRegistryV2:   `0x${string}` | null  // deployed NodeRegistryV2 contract (with NodeType enum)
+  nodeType:         number                   // 0=Origin 1=Router 2=Hybrid (default: 1)
   autoDiscover:     boolean               // pull peer lists from synced peers (default: true)
   // Admin auth — claimed via SIWE on first login, decoupled from gatewayKey
   adminAddress:     string | null
@@ -56,6 +57,7 @@ export type ConfigFile = {
   nodeUrl?: string
   nodeRegistry?: string
   nodeRegistryV2?: string
+  nodeType?: number
   autoDiscover?: boolean
   adminAddress?: string
   cdnProvider?: string
@@ -128,6 +130,7 @@ export function loadConfig(): Config {
     NODE_URL:            process.env.NODE_URL             ?? file.nodeUrl,
     NODE_REGISTRY:       process.env.NODE_REGISTRY        ?? file.nodeRegistry,
     NODE_REGISTRY_V2:    process.env.NODE_REGISTRY_V2      ?? file.nodeRegistryV2,
+    NODE_TYPE:           process.env.NODE_TYPE               ?? String(file.nodeType ?? ''),
     AUTO_DISCOVER:       process.env.AUTO_DISCOVER        ?? String(file.autoDiscover ?? 'true'),
     CDN_PROVIDER:        process.env.CDN_PROVIDER         ?? file.cdnProvider,
     CDN_API_KEY:         process.env.CDN_API_KEY          ?? file.cdnApiKey,
@@ -187,7 +190,8 @@ export function loadConfig(): Config {
   const nodeRegistryV2 = (raw as any).NODE_REGISTRY_V2?.trim()
     ? requireHex('NODE_REGISTRY_V2', (raw as any).NODE_REGISTRY_V2.trim())
     : null
-  const autoDiscover = raw.AUTO_DISCOVER?.toLowerCase() !== 'false'
+  const nodeType = Number((raw as any).NODE_TYPE?.trim() || '1') || 1 // 0=Origin 1=Router 2=Hybrid
+    const autoDiscover = raw.AUTO_DISCOVER?.toLowerCase() !== 'false'
 
   if (nodeUrl) {
     console.log(`[config] node url:  ${nodeUrl}${nodeRegistryV2 ? ` registryV2=${nodeRegistryV2}` : nodeRegistry ? ` registry=${nodeRegistry}` : ''}`)
@@ -236,6 +240,7 @@ export function loadConfig(): Config {
     nodeUrl,
     nodeRegistry,
     nodeRegistryV2,
+    nodeType,
     autoDiscover,
     adminAddress,
     cdnProvider,

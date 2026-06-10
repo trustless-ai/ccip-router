@@ -398,7 +398,7 @@ adminRouter.post('/api/register', async (c) => {
   }
   const body     = await c.req.json().catch(() => ({})) as { nodeType?: number }
   const useV2    = !!config.nodeRegistryV2
-  const nodeType = (body.nodeType ?? NodeType.Router) as NodeType
+  const nodeType = (body.nodeType ?? config.nodeType ?? NodeType.Router) as NodeType
   const txHash   = useV2
     ? await registerNodeV2(config.nodeUrl, {
         rpcUrl: config.rpcUrl, chainId: config.chainId,
