@@ -372,6 +372,8 @@ npm run dev
 | `CHAIN_ID` | No | `1` | Chain where the ERC-8004 registry is deployed. |
 | `ATTESTATION_INDEX` | No | — | Deployed `AttestationIndex` contract address. Enables on-chain anchoring. |
 | `NODE_REGISTRY` | No | — | Deployed `NodeRegistry` contract address. Enables on-chain node registration. |
+| `NODE_REGISTRY_V2` | No | — | Deployed `NodeRegistryV2` contract address. Uses `NodeType` enum for register and discover. Falls back to `NODE_REGISTRY` if unset. |
+| `NODE_TYPE` | No | `1` | Node type for `NodeRegistryV2` registration: `0`=Origin, `1`=Router (default), `2`=Hybrid. Origin nodes do not participate in settlement quorum. |
 | `RPC_URL` | No | — | JSON-RPC endpoint. Required alongside `ATTESTATION_INDEX`. |
 | `MODEL_HASH` | No | — | `keccak256` of model weights CID. Required to activate WYRIWE attestation. |
 | `NODE_URL` | No | — | This node's public URL. Required for VNI (signed node identity). |
@@ -833,6 +835,8 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] IPFS panel custom resolver field — optional; falls back to ENS Public Resolver; enables `setContenthash` on any CCIP-Read resolver (e.g. dinamic.eth)
 - [x] Version panel update guidance — Watchtower / Docker / Railway / npm paths documented inline
 - [x] Recent records panel spans full grid width; scrollbar transparent track
+- [x] **v0.6.1** — `NodeRegistryV2` integration: `NODE_REGISTRY_V2` env var, `NODE_REGISTRY_V2_ABI` + `NodeType` enum in `abi.ts`, `registerNodeV2()`, `/api/register` branches on V2, `/api/peers/discover` reads 4-tuple `[signers, urls, nodeTypes, timestamps]`; `nodeType` in peer response; `CommitRevealSettlerV2` deployed Sepolia (`0x5e2e0007F5371e96035CFBab75d5d8db5875A267`) — bond/slash, Router+Hybrid gate; `GenericCommitRevealSettler` deployed Sepolia (`0xFe7Ab6d95f7567a311B98D029373d0fc1511aCCe`) — bytes-generic commit/reveal for WYRIWE L4, OCP, ERC-8275
+- [x] **v0.6.2** — `NODE_TYPE` env var: nodes declare their own type for `NodeRegistryV2` registration (`0`=Origin, `1`=Router default, `2`=Hybrid), prevents Origin nodes registering as Router; CI always pushes `latest` tag to GHCR on branch push
 
 ---
 
