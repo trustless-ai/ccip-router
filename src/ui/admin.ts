@@ -355,10 +355,11 @@ adminRouter.post('/api/publish', async (c) => {
   const records = await db.getRecentRecords(config.syncNamespace + ':wyriwe', limit)
 
   const opts: ChainOpts = {
-    rpcUrl:          config.rpcUrl,
-    chainId:         config.chainId,
-    gatewayKey:      config.gatewayKey,
-    contractAddress: config.attestationIndex,
+    rpcUrl:              config.rpcUrl,
+    chainId:             config.chainId,
+    gatewayKey:          config.gatewayKey,
+    contractAddress:     config.attestationIndex,
+    ...(config.truthAnchorAddress ? { truthAnchorAddress: config.truthAnchorAddress } : {}),
   }
 
   const results = await Promise.allSettled(records.map((r) => publishAttestation(r, opts)))

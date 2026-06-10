@@ -1,18 +1,19 @@
 import type { MeshRecord } from '../db/types.js'
-import { ATTESTATION_INDEX_ABI } from './abi.js'
+import { ATTESTATION_INDEX_ABI, TRUTH_ANCHOR_V1_ABI } from './abi.js'
 import { getPublicClient, getWalletClient } from './client.js'
 
 const ZERO_HASH = '0x0000000000000000000000000000000000000000000000000000000000000000'
 
 export type ChainOpts = {
-  rpcUrl:          string
-  chainId:         number
-  gatewayKey:      `0x${string}`
-  contractAddress: `0x${string}`
+  rpcUrl:               string
+  chainId:              number
+  gatewayKey:           `0x${string}`
+  contractAddress:      `0x${string}`
+  truthAnchorAddress?:  `0x${string}`
 }
 
 export type PublishResult =
-  | { status: 'published'; txHash: `0x${string}` }
+  | { status: 'published'; txHash: `0x${string}`; truthAnchorTxHash?: `0x${string}` }
   | { status: 'skipped' }
   | { status: 'error'; reason: string }
 
@@ -66,7 +67,26 @@ export async function publishAttestation(
     args:         [a, record.signature as `0x${string}`],
   })
 
-  return { status: 'published', txHash }
+  // ERC-8263: also anchor to TruthAnchorV1 when configured (best-effort, non-blocking)
+  let truthAnchorTxHash: `0x${string}` | undefined
+  if (opts.truthAnchorAddress) {
+    try {
+      const signerAddr = walletClient.account.address
+      const agentIdBytes32 = `0x${'0'.repeat(24)}${signerAddr.slice(2).toLowerCase()}` as `0x${string}`
+      const aux = `0x${Buffer.from('ccip-router').toString('hex')}` as `0x${string}`
+      truthAnchorTxHash = await walletClient.writeContract({
+        address:      opts.truthAnchorAddress,
+        abi:          TRUTH_ANCHOR_V1_ABI,
+        functionName: 'anchorWithAux',
+        args:         [0, agentIdBytes32, commitmentHash, aux],
+      })
+      console.log(`[publish] TruthAnchorV1 anchored: ${truthAnchorTxHash}`)
+    } catch (e) {
+      console.warn('[publish] TruthAnchorV1 anchor failed (best-effort):', e)
+    }
+  }
+
+  return { status: 'published', txHash, ...(truthAnchorTxHash ? { truthAnchorTxHash } : {}) }
 }
 
 // Check whether an inputHash is anchored on-chain.

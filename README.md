@@ -384,6 +384,7 @@ npm run dev
 | `NETWORK_KEY` | No | — | Ethereum address. Messages signed by this key are marked as official network announcements. |
 | `DISABLE_ADMIN` | No | `false` | Set `true` to skip mounting `/admin` and `/static` entirely. Recommended for public PaaS nodes. |
 | `RESOLVER_ADDRESS` | No | — | Deployed `OffchainResolver` contract (informational — shown in spec audit). |
+| `TRUTH_ANCHOR_ADDRESS` | No | — | ERC-8263 `TruthAnchorV1` contract address. When set, fires `anchorWithAux()` after every `AttestationIndex.record()` — emits `AnchorProof` with the `commitmentHash` as `proofHash`. Mainnet: `0xe95d6a15966984c209a62a2c188828555eb5ec3d`. Best-effort; does not affect `AttestationIndex` anchoring on failure. |
 
 \* Can also come from `config.json` written by the setup wizard.
 \** Optional on persistent deployments; required on stateless ones — see [Self-hosted vs stateless](#self-hosted-vs-stateless-deployments) below.
@@ -839,6 +840,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] **v0.6.1** — `NodeRegistryV2` integration: `NODE_REGISTRY_V2` env var, `NODE_REGISTRY_V2_ABI` + `NodeType` enum in `abi.ts`, `registerNodeV2()`, `/api/register` branches on V2, `/api/peers/discover` reads 4-tuple `[signers, urls, nodeTypes, timestamps]`; `nodeType` in peer response; `CommitRevealSettlerV2` deployed Sepolia (`0x5e2e0007F5371e96035CFBab75d5d8db5875A267`) — bond/slash, Router+Hybrid gate; `GenericCommitRevealSettler` deployed Sepolia (`0xFe7Ab6d95f7567a311B98D029373d0fc1511aCCe`) — bytes-generic commit/reveal for WYRIWE L4, OCP, ERC-8275
 - [x] **v0.6.2** — `NODE_TYPE` env var: nodes declare their own type for `NodeRegistryV2` registration (`0`=Origin, `1`=Router default, `2`=Hybrid), prevents Origin nodes registering as Router; CI always pushes `latest` tag to GHCR on branch push
 - [x] **v0.6.3** — `EscrowV1` deployed Sepolia (`0x18165265aDBA40054792929D89c6C487Ae2242E9`, verified): ERC-8275 trust-minimized escrow — createOrder / confirmOrder / disputeOrder / resolveDispute / refundExpiredOrder; slash pool accumulator for `CommitRevealSettlerV2`; `IAgentEscrow` interface added
+- [x] **v0.6.4** — ERC-8263 interop: `TRUTH_ANCHOR_ADDRESS` optional env var wires `TruthAnchorV1.anchorWithAux()` as a second anchor target alongside `AttestationIndex`; fires after every successful on-chain record, emitting `AnchorProof(agentIdScheme, agentId, commitmentHash, operator, aux)` with `aux=0x636369702d726f75746572` ("ccip-router"); best-effort (AttestationIndex anchor succeeds independently); `truthAnchorTxHash` returned in publish result
 
 ---
 

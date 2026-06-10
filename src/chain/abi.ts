@@ -203,3 +203,32 @@ export const NODE_REGISTRY_V2_ABI = [
     ],
   },
 ] as const
+
+// ERC-8263 TruthAnchorV1 — permissionless on-chain proof anchor (Vincent Wu)
+// Mainnet: 0xe95d6a15966984c209a62a2c188828555eb5ec3d
+// Sepolia:  0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C
+export const TRUTH_ANCHOR_V1_ABI = [
+  {
+    type: 'function',
+    name: 'anchorWithAux',
+    inputs: [
+      { name: 'agentIdScheme', type: 'uint8'   },
+      { name: 'agentId',       type: 'bytes32' },
+      { name: 'proofHash',     type: 'bytes32' },
+      { name: 'aux',           type: 'bytes'   },
+    ],
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'event',
+    name: 'AnchorProof',
+    inputs: [
+      { name: 'agentIdScheme', type: 'uint8',   indexed: false },
+      { name: 'agentId',       type: 'bytes32', indexed: true  },
+      { name: 'proofHash',     type: 'bytes32', indexed: true  },
+      { name: 'operator',      type: 'address', indexed: true  },
+      { name: 'aux',           type: 'bytes',   indexed: false },
+    ],
+  },
+] as const

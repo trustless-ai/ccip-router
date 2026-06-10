@@ -35,6 +35,8 @@ export type Config = {
   disableAdmin:     boolean
   // On-chain CCIP-Read resolver contract (informational — shown in spec audit)
   resolverAddress:  `0x${string}` | null
+  // ERC-8263 TruthAnchorV1 — optional second anchor target alongside AttestationIndex
+  truthAnchorAddress: `0x${string}` | null
 }
 
 export type ConfigFile = {
@@ -65,6 +67,7 @@ export type ConfigFile = {
   networkKey?: string
   disableAdmin?: boolean
   resolverAddress?: string
+  truthAnchorAddress?: string
 }
 
 export const CONFIG_FILE_PATH = resolve(process.cwd(), process.env.CONFIG_PATH ?? 'config.json')
@@ -137,6 +140,7 @@ export function loadConfig(): Config {
     NETWORK_KEY:         process.env.NETWORK_KEY          ?? file.networkKey,
     DISABLE_ADMIN:       process.env.DISABLE_ADMIN        ?? String(file.disableAdmin ?? 'false'),
     RESOLVER_ADDRESS:    process.env.RESOLVER_ADDRESS     ?? file.resolverAddress,
+    TRUTH_ANCHOR_ADDRESS: process.env.TRUTH_ANCHOR_ADDRESS ?? file.truthAnchorAddress,
     ADMIN_ADDRESS:       process.env.ADMIN_ADDRESS        ?? undefined,
   }
 
@@ -215,6 +219,14 @@ export function loadConfig(): Config {
     ? requireHex('RESOLVER_ADDRESS', raw.RESOLVER_ADDRESS.trim())
     : null
 
+  const truthAnchorAddress = (raw as any).TRUTH_ANCHOR_ADDRESS?.trim()
+    ? requireHex('TRUTH_ANCHOR_ADDRESS', (raw as any).TRUTH_ANCHOR_ADDRESS.trim())
+    : null
+
+  if (truthAnchorAddress) {
+    console.log(`[config] anchor:    truthAnchorAddress=${truthAnchorAddress} (ERC-8263)`)
+  }
+
   if (disableAdmin) {
     console.log('[config] admin:     disabled (public node mode)')
   }
@@ -248,6 +260,7 @@ export function loadConfig(): Config {
     networkKey,
     disableAdmin,
     resolverAddress,
+    truthAnchorAddress,
   }
 }
 
