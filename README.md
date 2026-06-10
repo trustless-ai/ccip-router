@@ -129,6 +129,8 @@ All ccip-router contracts are permissionless — no owner, no admin. One deploym
 | `NodeRegistry` | [`0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7`](https://sepolia.etherscan.io/address/0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7) | Public directory of nodes. `register(url, sig)` proves key ownership via EIP-191 — the relayer (`msg.sender`) does not need to be the signing key. |
 | `WyriweProofVerifier` | [`0x001eFFa0fD1D171b164808644678F3301d8EDC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96#code) | ERC-8274 `IProofVerifier` implementation. `verify(inputHash, outputHash, abi.encode(agentId, registry), abi.encode(modelHash, rawInputHash, sanitizationPipelineHash, commitmentHash, timestamp, sig))` — recomputes ERC-8281 (OCP) commitment, recovers signer, returns bool. No external calls. |
 | `WyriweAttestationVerifier` *(deprecated)* | [`0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61`](https://sepolia.etherscan.io/address/0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61) | ERC-8183 `IAttestationVerifier`. Superseded by `WyriweProofVerifier`. |
+| `CommitRevealSettler` | [`0xc972F18CaD3c58F754ad24a977C46463B368411a`](https://sepolia.etherscan.io/address/0xc972F18CaD3c58F754ad24a977C46463B368411a#code) | ERC-8275 Layer 2 on-chain settlement. Nodes call `submitCommit(periodId, commitmentHash)` after freeze, then `submitReveal(periodId, rows[])` to verify the snapshot root on-chain. Emits `RevealMismatch` on hash mismatch. Sepolia prototype — bond/slash not yet implemented. |
+| `NodeRegistryV2` *(pending group sign-off)* | [`0xeFae266aE0a74518da320a029dD76F4d47e2a87b`](https://sepolia.etherscan.io/address/0xeFae266aE0a74518da320a029dD76F4d47e2a87b#code) | ERC-8275 node registry extended with `enum NodeType { Origin, Router, Hybrid }`. `EscrowV1` reads `nodeType` at settlement time to route payouts to the correct reward pool. Breaking change to `NodeRegistry.register()` — bundled with next mainnet contract revision pending group sign-off. |
 
 **ERC-8263 canonical reference contract** (Vincent Wu, not ccip-router):
 
@@ -180,7 +182,7 @@ Source: [`contracts/OffchainResolver.sol`](contracts/OffchainResolver.sol)
 
 **To deploy to another chain:** open the admin panel → Deploy contracts → select the chain → connect wallet → three transactions (one per contract). No private key is stored — MetaMask signs everything in-browser.
 
-Source: [`contracts/AttestationIndex.sol`](contracts/AttestationIndex.sol) · [`contracts/NodeRegistry.sol`](contracts/NodeRegistry.sol) · [`contracts/IProofVerifier.sol`](contracts/IProofVerifier.sol) · [`contracts/WyriweProofVerifier.sol`](contracts/WyriweProofVerifier.sol)
+Source: [`contracts/AttestationIndex.sol`](contracts/AttestationIndex.sol) · [`contracts/NodeRegistry.sol`](contracts/NodeRegistry.sol) · [`contracts/NodeRegistryV2.sol`](contracts/NodeRegistryV2.sol) · [`contracts/CommitRevealSettler.sol`](contracts/CommitRevealSettler.sol) · [`contracts/IProofVerifier.sol`](contracts/IProofVerifier.sol) · [`contracts/WyriweProofVerifier.sol`](contracts/WyriweProofVerifier.sol)
 
 ---
 
@@ -597,7 +599,10 @@ POST /contributions/snapshot/freeze
 ```
  — rows sorted by contributor address ascending.
  — binds snapshot to period and node, prevents cross-node replay.
-Freeze is idempotent. Status lifecycle: .
+Freeze is idempotent. Status lifecycle: `pending -> frozen -> committed -> revealed`.
+
+**On-chain settlement (Sepolia):** after freeze, call `CommitRevealSettler.submitCommit(periodId, commitmentHash)` using the `commitmentHash` from the freeze response, then `submitReveal(periodId, rows[])` to verify on-chain.
+CommitRevealSettler: [`0xc972F18CaD3c58F754ad24a977C46463B368411a`](https://sepolia.etherscan.io/address/0xc972F18CaD3c58F754ad24a977C46463B368411a#code) (Sepolia, verified)
 
 ### Join request (new node onboarding)
 ```
