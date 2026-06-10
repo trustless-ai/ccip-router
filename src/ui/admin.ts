@@ -210,7 +210,8 @@ adminRouter.get('/api/audit', async (c) => {
   ])
   const erc8004On  = !!(config.agentId && config.registryAddress)
   const wyriweOn   = wyriweCount > 0
-  const chainOn    = !!(config.attestationIndex && config.rpcUrl)
+  const chainOn        = !!(config.attestationIndex && config.rpcUrl)
+  const truthAnchorOn  = !!(config.truthAnchorAddress)
   const vniOn      = !!(config.gatewayKey && config.nodeUrl)
   const registryOn = !!(config.nodeRegistry && config.rpcUrl)
 
@@ -283,19 +284,20 @@ adminRouter.get('/api/audit', async (c) => {
     },
     {
       key: 'erc8263', name: 'ERC-8263', label: 'On-chain Anchor',
-      status: wyriweOn ? 'pass' : 'inactive',
+      status: wyriweOn && truthAnchorOn ? 'pass' : wyriweOn ? 'warn' : 'inactive',
       description: 'Anchor/write layer — commitmentHash is carried as proofHash in TruthAnchorV1, emitting AnchorProof(agentIdScheme, agentId, proofHash, operator, aux). One valid instantiation of the opaque proofHash; the same anchor layer serves OCP, WYRIWE, and zkML uniformly.',
       details: wyriweOn
         ? [
-            { k: 'proofHash',  v: 'commitmentHash (ERC-8281 keccak envelope)' },
-            { k: 'Event',      v: 'AnchorProof(agentIdScheme, agentId, proofHash, operator, aux)' },
+            { k: 'proofHash',        v: 'commitmentHash (ERC-8281 keccak envelope)' },
+            { k: 'Event',            v: 'AnchorProof(agentIdScheme, agentId, proofHash, operator, aux)' },
+            { k: 'TRUTH_ANCHOR_ADDRESS', v: truthAnchorOn ? config.truthAnchorAddress! : 'not configured — set TRUTH_ANCHOR_ADDRESS', warn: !truthAnchorOn },
             { k: 'TruthAnchorV1 (mainnet)', v: '0xe95d6a15966984c209a62a2c188828555eb5ec3d' },
             { k: 'TruthAnchorV1 (Sepolia)', v: '0x89EE9b68c3b2f50cbE9D0fC4Dc134939a0475c1C' },
-            { k: 'Author',     v: 'Vincent Wu' },
+            { k: 'Author',           v: 'Vincent Wu' },
           ]
         : [
-            { k: 'Missing',    v: 'Requires WYRIWE to be active', warn: true },
-            { k: 'Enable',     v: 'Enable WYRIWE first via withWyriwe() wrapper' },
+            { k: 'Missing',          v: 'Requires WYRIWE to be active', warn: true },
+            { k: 'Enable',           v: 'Enable WYRIWE first via withWyriwe() wrapper' },
           ],
     },
     {
@@ -363,19 +365,21 @@ adminRouter.post('/api/publish', async (c) => {
   }
 
   const results = await Promise.allSettled(records.map((r) => publishAttestation(r, opts)))
-  let published = 0, skipped = 0
+  let published = 0, skipped = 0, truthAnchored = 0
   const errors: string[] = []
   for (const r of results) {
     if (r.status === 'fulfilled') {
-      if (r.value.status === 'published') published++
-      else if (r.value.status === 'skipped') skipped++
+      if (r.value.status === 'published') {
+        published++
+        if (r.value.truthAnchorTxHash) truthAnchored++
+      } else if (r.value.status === 'skipped') skipped++
       else errors.push(r.value.reason)
     } else {
       errors.push(String(r.reason))
     }
   }
-  console.log(`[publish] ${published} anchored, ${skipped} already on-chain, ${errors.length} errors`)
-  return c.json({ ok: true, published, skipped, errors })
+  console.log(`[publish] ${published} anchored, ${skipped} already on-chain, ${errors.length} errors${truthAnchored ? `, ${truthAnchored} TruthAnchorV1` : ''}`)
+  return c.json({ ok: true, published, skipped, truthAnchored, errors })
 })
 
 adminRouter.get('/api/upgrade', async (c) => {
@@ -1384,6 +1388,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     }
     .audit-mini-pill.pass     { background: var(--green-l); color: var(--green);  border: 1px solid var(--green-b); }
     .audit-mini-pill.inactive { background: var(--s1);      color: var(--muted);  border: 1px solid var(--border); }
+    .audit-mini-pill.warn     { background: rgba(245,158,11,0.12); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
 
     .audit-grid {
       display: grid; grid-template-columns: repeat(2, 1fr);
@@ -1397,6 +1402,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       transition: border-color 0.15s;
     }
     .spec-card.pass     { border-color: rgba(34,197,94,0.2); }
+    .spec-card.warn     { border-color: rgba(245,158,11,0.25); }
     .spec-card.inactive { opacity: 0.8; }
 
     .spec-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px; }
@@ -1408,6 +1414,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       flex-shrink: 0; margin-left: 8px;
     }
     .spec-badge.pass     { background: var(--green-l); color: var(--green);  border: 1px solid var(--green-b); }
+    .spec-badge.warn     { background: rgba(245,158,11,0.12); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
     .spec-badge.inactive { background: var(--s1);      color: var(--muted);  border: 1px solid var(--border); }
 
     .spec-desc { font-size: 11px; color: var(--muted); margin-bottom: 12px; line-height: 1.55; }
@@ -2735,7 +2742,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
             <div class="spec-name">\${s.name}</div>
             <div class="spec-label">\${s.label}</div>
           </div>
-          <span class="spec-badge \${s.status}">\${s.status === 'pass' ? '✓ Pass' : '○ Inactive'}</span>
+          <span class="spec-badge \${s.status}">\${s.status === 'pass' ? '✓ Pass' : s.status === 'warn' ? '⚠ Partial' : '○ Inactive'}</span>
         </div>
         <div class="spec-desc">\${s.description}</div>
         <div class="spec-rows">
@@ -2809,7 +2816,8 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
       const res  = await fetch('/admin/api/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
       const data = await res.json()
       if (!res.ok) { toast(data.error || 'Publish failed'); return }
-      toast(\`↑ \${data.published} anchored · \${data.skipped} already on-chain\`)
+      const anchorSuffix = data.truthAnchored ? \` · \${data.truthAnchored} TruthAnchorV1\` : ''
+      toast(\`↑ \${data.published} anchored · \${data.skipped} already on-chain\${anchorSuffix}\`)
     } catch (e) {
       toast('Publish error: ' + e.message)
     } finally {
