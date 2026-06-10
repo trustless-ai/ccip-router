@@ -3655,10 +3655,11 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     const idx   = STEPS.indexOf(d.status)
     document.getElementById('snap-stepper').innerHTML = STEPS.map((s, i) => {
       const current = i === idx, done = i < idx
-      const color  = current ? 'var(--accent)' : done ? 'var(--green)' : 'var(--muted)'
-      const bg     = current ? 'var(--accent-l)' : done ? 'var(--green-l)' : 'var(--s2)'
-      const border = current ? 'var(--accent-b)' : done ? 'var(--green-b)' : 'var(--border)'
-      return '<span style="background:' + bg + ';border:1px solid ' + border + ';color:' + color + ';padding:3px 12px;border-radius:20px">' + s + '</span>'
+      const color  = current ? 'var(--green)'         : done ? 'rgba(255,255,255,0.35)' : 'var(--muted)'
+      const bg     = current ? 'rgba(34,197,94,0.18)' : done ? 'rgba(255,255,255,0.04)' : 'transparent'
+      const border = current ? 'rgba(34,197,94,0.45)' : done ? 'rgba(255,255,255,0.1)'  : 'var(--border)'
+      const weight = current ? '600' : '400'
+      return '<span style="background:' + bg + ';border:1px solid ' + border + ';color:' + color + ';padding:3px 12px;border-radius:20px;font-weight:' + weight + '">' + s + '</span>'
         + (i < STEPS.length - 1 ? '<span style="color:var(--border);padding:0 2px">→</span>' : '')
     }).join('')
     const pill = document.getElementById('snapshot-status-pill')
