@@ -68,17 +68,16 @@ export async function publishAttestation(
   })
 
   // ERC-8263: also anchor to TruthAnchorV1 when configured (best-effort, non-blocking)
+  // scheme=0x01 REGISTRY: agentId is a 32-byte registry record ID (ERC-8004 compatible)
   let truthAnchorTxHash: `0x${string}` | undefined
   if (opts.truthAnchorAddress) {
     try {
-      const signerAddr = walletClient.account.address
-      const agentIdBytes32 = `0x${'0'.repeat(24)}${signerAddr.slice(2).toLowerCase()}` as `0x${string}`
       const aux = `0x${Buffer.from('ccip-router').toString('hex')}` as `0x${string}`
       truthAnchorTxHash = await walletClient.writeContract({
         address:      opts.truthAnchorAddress,
         abi:          TRUTH_ANCHOR_V1_ABI,
         functionName: 'anchorWithAux',
-        args:         [0, agentIdBytes32, commitmentHash, aux],
+        args:         [1, a.agentId, commitmentHash, aux],
       })
       console.log(`[publish] TruthAnchorV1 anchored: ${truthAnchorTxHash}`)
     } catch (e) {
