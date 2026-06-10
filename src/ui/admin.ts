@@ -9,9 +9,9 @@ import { getLogs } from '../log.js'
 import { requireAdmin, setAdminSession, clearAdminSession } from './auth.js'
 import { generateNonce, verifySiwe } from './siwe.js'
 import { publishAttestation, type ChainOpts } from '../chain/publish.js'
-import { registerNode } from '../chain/register.js'
+import { registerNode, registerNodeV2 } from '../chain/register.js'
 import { getPublicClient } from '../chain/client.js'
-import { NODE_REGISTRY_ABI } from '../chain/abi.js'
+import { NODE_REGISTRY_ABI, NODE_REGISTRY_V2_ABI, NodeType } from '../chain/abi.js'
 import { getCdnProvider } from '../cdn/index.js'
 import { namehash, encodeFunctionData } from 'viem'
 import { NODE_VERSION } from '../version.js'
@@ -391,17 +391,25 @@ adminRouter.get('/api/upgrade', async (c) => {
 })
 
 adminRouter.post('/api/register', async (c) => {
-  const config = getConfig()
-  if (!config.nodeRegistry || !config.rpcUrl || !config.gatewayKey || !config.nodeUrl) {
-    return c.json({ error: 'NODE_REGISTRY, NODE_URL, RPC_URL, and GATEWAY_PRIVATE_KEY required' }, 400)
+  const config  = getConfig()
+  const regAddr = config.nodeRegistryV2 ?? config.nodeRegistry
+  if (!regAddr || !config.rpcUrl || !config.gatewayKey || !config.nodeUrl) {
+    return c.json({ error: 'NODE_REGISTRY (or NODE_REGISTRY_V2), NODE_URL, RPC_URL, and GATEWAY_PRIVATE_KEY required' }, 400)
   }
-  const txHash = await registerNode(config.nodeUrl, {
-    rpcUrl:          config.rpcUrl,
-    chainId:         config.chainId,
-    gatewayKey:      config.gatewayKey,
-    contractAddress: config.nodeRegistry,
-  })
-  console.log(`[register] node registered on-chain: ${txHash}`)
+  const body     = await c.req.json().catch(() => ({})) as { nodeType?: number }
+  const useV2    = !!config.nodeRegistryV2
+  const nodeType = body.nodeType ?? NodeType.Router
+  const txHash   = useV2
+    ? await registerNodeV2(config.nodeUrl, {
+        rpcUrl: config.rpcUrl, chainId: config.chainId,
+        gatewayKey: config.gatewayKey, contractAddress: config.nodeRegistryV2!,
+        nodeType,
+      })
+    : await registerNode(config.nodeUrl, {
+        rpcUrl: config.rpcUrl, chainId: config.chainId,
+        gatewayKey: config.gatewayKey, contractAddress: config.nodeRegistry!,
+      })
+  console.log(`[register] node registered on-chain (${useV2 ? 'V2' : 'V1'}): ${txHash}`)
   return c.json({ ok: true, txHash })
 })
 
@@ -437,16 +445,31 @@ adminRouter.get('/api/peers/discover', async (c) => {
     let count: bigint
     let signers: `0x${string}`[]
     let urls: string[]
+    let nodeTypes: number[]
+    const useV2 = !!config.nodeRegistryV2
+    const abi   = useV2 ? NODE_REGISTRY_V2_ABI : NODE_REGISTRY_ABI
     try {
-      count = await client.readContract({ address, abi: NODE_REGISTRY_ABI, functionName: 'nodeCount' }) as bigint
+      count = await client.readContract({ address, abi, functionName: 'nodeCount' }) as bigint
       if (count === 0n) return c.json({ nodes: [] })
-      // viem returns a tuple [signers, urls, timestamps] for multi-output functions
-      const result = await client.readContract({
-        address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
-        args: [0n, count > 50n ? 50n : count],
-      }) as unknown as [`0x${string}`[], string[], bigint[]]
-      signers = result[0]
-      urls    = result[1]
+      if (useV2) {
+        // V2: tuple is [signers, urls, nodeTypes, timestamps]
+        const result = await client.readContract({
+          address, abi: NODE_REGISTRY_V2_ABI, functionName: 'getNodes',
+          args: [0n, count > 50n ? 50n : count],
+        }) as unknown as [`0x${string}`[], string[], number[], bigint[]]
+        signers   = result[0]
+        urls      = result[1]
+        nodeTypes = result[2]
+      } else {
+        // V1: tuple is [signers, urls, timestamps]
+        const result = await client.readContract({
+          address, abi: NODE_REGISTRY_ABI, functionName: 'getNodes',
+          args: [0n, count > 50n ? 50n : count],
+        }) as unknown as [`0x${string}`[], string[], bigint[]]
+        signers   = result[0]
+        urls      = result[1]
+        nodeTypes = result[0].map(() => NodeType.Router) // V1 has no nodeType — assume Router
+      }
     } catch (err) {
       console.error('[discover] contract read failed:', err)
       return c.json({ error: `Registry read failed: ${(err as Error).message ?? err}` }, 502)
@@ -468,12 +491,13 @@ adminRouter.get('/api/peers/discover', async (c) => {
           if (h.listed === false) return null
           return {
             url, signerAddress, alreadyPeer, healthy: true,
+            nodeType: nodeTypes[i],
             role:    (h.role as string) ?? ((h.version && /^\d+\.\d+/.test(h.version as string)) ? 'router' : 'gateway'),
             version: (h.version as string) ?? null,
             tiers:   (h.tiers as Record<string, boolean>) ?? null,
           }
         } catch {
-          return { url, signerAddress, alreadyPeer, healthy: false, role: 'unknown', version: null, tiers: null }
+          return { url, signerAddress, alreadyPeer, healthy: false, nodeType: nodeTypes[i], role: 'unknown', version: null, tiers: null }
         }
       })
     )
@@ -557,6 +581,7 @@ adminRouter.get('/api/config', (c) => {
     rpcUrl:           config.rpcUrl           ?? '',
     attestationIndex: config.attestationIndex ?? '',
     nodeRegistry:     config.nodeRegistry     ?? '',
+    nodeRegistryV2:   config.nodeRegistryV2   ?? '',
     resolverAddress:  config.resolverAddress  ?? '',
     hasAdminSecret:   !!config.adminSecret,
     adminAddress:     config.adminAddress  ?? '',
@@ -606,6 +631,7 @@ adminRouter.post('/api/config', async (c) => {
     rpcUrl:           body.rpcUrl           || existing.rpcUrl,
     attestationIndex: body.attestationIndex || existing.attestationIndex,
     nodeRegistry:     body.nodeRegistry     || existing.nodeRegistry,
+    nodeRegistryV2:   body.nodeRegistryV2   || existing.nodeRegistryV2,
     resolverAddress:  body.resolverAddress  || existing.resolverAddress,
   }
 

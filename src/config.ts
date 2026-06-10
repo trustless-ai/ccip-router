@@ -20,7 +20,8 @@ export type Config = {
   rpcUrl:           string | null          // JSON-RPC endpoint for reads + writes
   // Phase 3 open network — optional
   nodeUrl:          string | null          // this node's public URL (for VNI + NodeRegistry)
-  nodeRegistry:     `0x${string}` | null  // deployed NodeRegistry contract
+  nodeRegistry:     `0x${string}` | null  // deployed NodeRegistry contract (V1)
+  nodeRegistryV2:   `0x${string}` | null  // deployed NodeRegistryV2 contract (with NodeType enum)
   autoDiscover:     boolean               // pull peer lists from synced peers (default: true)
   // Admin auth — claimed via SIWE on first login, decoupled from gatewayKey
   adminAddress:     string | null
@@ -54,6 +55,7 @@ export type ConfigFile = {
   // Phase 3
   nodeUrl?: string
   nodeRegistry?: string
+  nodeRegistryV2?: string
   autoDiscover?: boolean
   adminAddress?: string
   cdnProvider?: string
@@ -125,6 +127,7 @@ export function loadConfig(): Config {
     RPC_URL:             process.env.RPC_URL             ?? file.rpcUrl,
     NODE_URL:            process.env.NODE_URL             ?? file.nodeUrl,
     NODE_REGISTRY:       process.env.NODE_REGISTRY        ?? file.nodeRegistry,
+    NODE_REGISTRY_V2:    process.env.NODE_REGISTRY_V2      ?? file.nodeRegistryV2,
     AUTO_DISCOVER:       process.env.AUTO_DISCOVER        ?? String(file.autoDiscover ?? 'true'),
     CDN_PROVIDER:        process.env.CDN_PROVIDER         ?? file.cdnProvider,
     CDN_API_KEY:         process.env.CDN_API_KEY          ?? file.cdnApiKey,
@@ -181,10 +184,13 @@ export function loadConfig(): Config {
   const nodeRegistry = raw.NODE_REGISTRY?.trim()
     ? requireHex('NODE_REGISTRY', raw.NODE_REGISTRY.trim())
     : null
+  const nodeRegistryV2 = (raw as any).NODE_REGISTRY_V2?.trim()
+    ? requireHex('NODE_REGISTRY_V2', (raw as any).NODE_REGISTRY_V2.trim())
+    : null
   const autoDiscover = raw.AUTO_DISCOVER?.toLowerCase() !== 'false'
 
   if (nodeUrl) {
-    console.log(`[config] node url:  ${nodeUrl}${nodeRegistry ? ` registry=${nodeRegistry}` : ''}`)
+    console.log(`[config] node url:  ${nodeUrl}${nodeRegistryV2 ? ` registryV2=${nodeRegistryV2}` : nodeRegistry ? ` registry=${nodeRegistry}` : ''}`)
   }
 
   // ADMIN_ADDRESS env var takes precedence over config.json — use this on stateless deployments
@@ -229,6 +235,7 @@ export function loadConfig(): Config {
     rpcUrl,
     nodeUrl,
     nodeRegistry,
+    nodeRegistryV2,
     autoDiscover,
     adminAddress,
     cdnProvider,

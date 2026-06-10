@@ -144,3 +144,62 @@ export const NODE_REGISTRY_ABI = [
     ],
   },
 ] as const
+
+// NodeType enum values (mirrors NodeRegistryV2.sol)
+export const NodeType = { Origin: 0, Router: 1, Hybrid: 2 } as const
+export type NodeType = (typeof NodeType)[keyof typeof NodeType]
+
+// NodeRegistryV2 — adds NodeType to register/getNode/getNodes
+// Deployed Sepolia: 0xeFae266aE0a74518da320a029dD76F4d47e2a87b
+export const NODE_REGISTRY_V2_ABI = [
+  {
+    type: 'function', name: 'register',
+    inputs:  [
+      { name: 'url',       type: 'string' },
+      { name: 'nodeType',  type: 'uint8'  },
+      { name: 'signature', type: 'bytes'  },
+    ],
+    outputs: [{ name: 'signer', type: 'address' }],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function', name: 'getNode',
+    inputs:  [{ name: 'signer', type: 'address' }],
+    outputs: [
+      { name: 'url',          type: 'string'  },
+      { name: 'nodeType',     type: 'uint8'   },
+      { name: 'registeredAt', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function', name: 'getNodeType',
+    inputs:  [{ name: 'signer', type: 'address' }],
+    outputs: [{ name: '', type: 'uint8' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function', name: 'nodeCount',
+    inputs: [], outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function', name: 'getNodes',
+    inputs:  [{ name: 'offset', type: 'uint256' }, { name: 'limit', type: 'uint256' }],
+    outputs: [
+      { name: 'signers',   type: 'address[]' },
+      { name: 'urls',      type: 'string[]'  },
+      { name: 'nodeTypes', type: 'uint8[]'   },
+      { name: 'timestamps', type: 'uint256[]' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'event', name: 'NodeRegistered',
+    inputs: [
+      { name: 'signer',   type: 'address', indexed: true  },
+      { name: 'url',      type: 'string',  indexed: false },
+      { name: 'nodeType', type: 'uint8',   indexed: false },
+    ],
+  },
+] as const
