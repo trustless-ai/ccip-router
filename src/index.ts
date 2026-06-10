@@ -185,6 +185,8 @@ app.post('/join-request', async (c) => {
   } catch (err) {
     return c.json({ error: `join request failed: ${(err as Error).message ?? String(err)}` }, 500)
   }
+})
+
 function toSnapshotResponse(s: {
   period_id:       number
   snapshot_cutoff: number

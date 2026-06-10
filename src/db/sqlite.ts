@@ -259,6 +259,8 @@ export class SQLiteDB implements DB {
 
       isBlockedPeer: this.db.prepare(`
         SELECT 1 FROM peer_blocklist WHERE url = ?
+      `),
+
       contributionsWithAddrs: this.db.prepare(`
         SELECT r.source_peer, COUNT(*) as count, p.signer_address
         FROM records r
@@ -507,6 +509,8 @@ export class SQLiteDB implements DB {
 
   async updateJoinRequestStatus(id: number, status: 'approved' | 'declined'): Promise<void> {
     this.stmts.jrUpdateStatus.run(status, id)
+  }
+
   async getContributionsWithAddresses(namespace: string): Promise<{ sourcePeer: string | null; count: number; signerAddress: string | null }[]> {
     const rows = this.stmts.contributionsWithAddrs.all(namespace) as { source_peer: string | null; count: number; signer_address: string | null }[]
     return rows.map((r) => ({ sourcePeer: r.source_peer, count: r.count, signerAddress: r.signer_address }))

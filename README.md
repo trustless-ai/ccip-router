@@ -583,11 +583,21 @@ GET /peers
 → { protocol: 1, node_version, signerAddress, peers: [{ url, signerAddress, healthy, lastSyncAt }] }
 ```
 
-### Contributions (ERC-8275)
+### Contributions (ERC-8275 Layer 1 + 2)
 ```
 GET /contributions
 → { namespace, contributions: [{ source, records }] }
+
+GET /contributions/snapshot?period=N
+→ { periodId, snapshotCutoff, frozenAt, rowCount, snapshotRoot, commitmentHash, nodeAddress, status }
+
+POST /contributions/snapshot/freeze
+{ "periodId": "N", "epochClose": "<unix_ts>" }   // epochClose optional; freeze triggers if now >= epochClose - 600s
+→ snapshot (frozen) | { status: "pending", snapshotCutoff, now }
 ```
+ — rows sorted by contributor address ascending.
+ — binds snapshot to period and node, prevents cross-node replay.
+Freeze is idempotent. Status lifecycle: .
 
 ### Join request (new node onboarding)
 ```
@@ -724,7 +734,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 | ERC-8263 | L3 On-chain anchor | `commitmentHash` carried as `proofHash` in `TruthAnchorV1` (Vincent Wu), emitting `AnchorProof`. The same opaque anchor layer serves OCP, WYRIWE, and zkML uniformly. | ✅ implemented |
 | EIP-712 | L4 Attestation | Structured signing (via `withWyriwe`) | ✅ implemented |
 | VNI | L5 Node Identity | Signed node identity, peer gossip | ✅ implemented |
-| ERC-8275 | L6 Economics | Contribution attribution (`/contributions` — per-peer record counts, foundation for usage-based node compensation) | ✅ implemented |
+| ERC-8275 | L6 Economics | Contribution attribution + Layer 2 snapshot freeze + commitmentHash | ✅ implemented |
 
 ---
 
@@ -764,6 +774,7 @@ Protocol version `1` is the current stable spec. Nodes on a different version ar
 - [x] VNI (Verifiable Node Identity) — `GET /vni` returns EIP-191 signed `{ nodeId, signerAddress, url, version, timestamp }`; peers verify during sync for authoritative signer resolution
 - [x] `contracts/NodeRegistry.sol` — on-chain node directory; `register(url, sig)` proves key ownership; `POST /admin/api/register` + "Register on-chain" button in VNI spec card
 - [x] ERC-8275 economics (MVP) — contribution attribution via `getContributions(namespace)`; `GET /contributions`; per-peer record counts surfaced in spec audit panel
+- [x] ERC-8275 Layer 2 — snapshot freeze endpoints; snapshotRoot + commitmentHash per spec; idempotent, pre-cutoff guard, pending → frozen lifecycle; migration v6
 - [x] Config: `NODE_URL`, `NODE_REGISTRY`, `AUTO_DISCOVER`; `/health` exposes `tiers.vni` + `tiers.onChain`
 
 ### Next — UI & node management
