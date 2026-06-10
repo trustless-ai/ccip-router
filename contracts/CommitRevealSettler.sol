@@ -7,6 +7,7 @@ pragma solidity ^0.8.20;
 ///         snapshot data. The contract verifies the reveal reconstructs the stored commit.
 ///
 /// @dev    PROTOTYPE — Sepolia only, not audited. No bond/slash mechanism yet.
+///         Deployed: 0xac32e3fd4CD1A3475bf8f67fbd7252aCD0eD1ce7 (Sepolia, block 11029514)
 ///         Row encoding and sort order must match ccip-router v0.6.0+:
 ///           snapshotRoot    = keccak256(abi.encode(rows))          // rows sorted by contributor asc
 ///           commitmentHash  = keccak256(abi.encode(snapshotRoot, periodId, nodeAddress))
