@@ -72,7 +72,8 @@ export class CcipRouter {
       })
     })
 
-    app.get('/:sender/:data', async (c) => {
+    app.get('/:sender/:data', async (c, next) => {
+      if (!c.req.param('sender').match(/^0x[0-9a-fA-F]{40}$/)) return next()
       let req: ReturnType<typeof decodeRequest>
       try {
         req = decodeRequest(c.req.param('sender'), c.req.param('data'))
