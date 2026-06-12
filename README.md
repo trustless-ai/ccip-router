@@ -332,6 +332,25 @@ All four nodes are registered in the mainnet [`NodeRegistry`](https://etherscan.
 
 ---
 
+## Live proof — ERC-8299 in production
+
+The first end-to-end cross-stack trace using the ERCs this repo implements ran on **12 June 2026**.
+
+**Ledger entry 23** — [`api.babyblueviper.com/ledger/23`](https://api.babyblueviper.com/ledger/23)
+
+**The trail:**
+
+| Step | Layer | Detail |
+|---|---|---|
+| Identity | ERC-8004 | PGA #14 (tokenId 14 in dinamic.eth dynamic registry, mainnet `ownerOf` checkable) |
+| Judgment | ERC-8299 (WYRIWE) | Triple-hash: `rawProposalHash → verdictHash → executedActionHash`. Verdict: `approve_with_concerns` (0.85). Verdict timestamp strictly before execution timestamp. |
+| Execution | Agent-to-agent bus | Action executed as judged — receipts on-chain |
+| Anchor | ERC-8263 | Entry 23 verdict event id → `TruthAnchorV1` (pending — closes the third side) |
+
+The ERC-8299 triple-hash chain (`rawProposalHash → verdictHash → executedActionHash`) maps directly to `withWyriwe()`'s sentinel path in this repo. The spec is at [ethereum/ERCs#1810](https://github.com/ethereum/ERCs/pull/1810).
+
+---
+
 ## Quick start (setup wizard)
 
 ```bash
