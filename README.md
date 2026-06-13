@@ -347,9 +347,11 @@ The first end-to-end cross-stack trace using the ERCs this repo implements ran o
 | Identity | ERC-8004 | PGA #14 (tokenId 14 in dinamic.eth dynamic registry, mainnet `ownerOf` checkable) |
 | Judgment | ERC-8299 (WYRIWE) | Triple-hash: `rawProposalHash → verdictHash → executedActionHash`. Verdict: `approve_with_concerns` (0.85). Verdict timestamp strictly before execution timestamp. |
 | Execution | Agent-to-agent bus | Action executed as judged — receipts on-chain |
-| Anchor | ERC-8263 | Entry 23 verdict event id → `TruthAnchorV1` (pending — closes the third side) |
+| Anchor | ERC-8263 | Entry 23 verdict event id anchored in `TruthAnchorV1` as an opaque `proofHash` — mainnet `0xe95d6a15…ec3d`, tx [`0xc75e2950…6090`](https://etherscan.io/tx/0xc75e295083c57411eafe99916c511908cfee3ef510067c1353749455711a6090), block 25308037 |
 
 The ERC-8299 triple-hash chain (`rawProposalHash → verdictHash → executedActionHash`) maps directly to `withWyriwe()`'s sentinel path in this repo. The spec is at [ethereum/ERCs#1810](https://github.com/ethereum/ERCs/pull/1810).
+
+All four legs are now on-chain — identity → judgment → anchor closes end to end, with the relay-attested verdict ~19h before the anchor block (two independent timestamp authorities on one verdict).
 
 ---
 
