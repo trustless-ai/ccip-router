@@ -8,6 +8,8 @@ No ENS required. No agents required. Any CCIP-Read project can plug in a resolve
 
 **→ [Integration guide](GUIDE.md)** — install, quickstart, attestation setup, contracts, mesh join.
 
+**📋 The mesh sync protocol is now a draft Standards Track ERC** — *Gateway Mesh Sync Protocol for CCIP-Read* ([draft](https://gist.github.com/TMerlini/a079a712ef078cbbb5668e48428c91ad), `requires: 3668, 191`), discussion at [Ethereum Magicians #28680](https://ethereum-magicians.org/t/gateway-to-gateway-coordination-for-eip-3668-proposing-a-mesh-sync-protocol/28680). This repo is its reference implementation.
+
 ---
 
 ## What you can build
