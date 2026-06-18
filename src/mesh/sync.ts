@@ -53,7 +53,7 @@ async function pullNamespace(
     }
 
     for (const record of body.records) {
-      const result = await validateAndInsert(record, db, peer.signerAddress, meshSigners)
+      const result = await validateAndInsert(record, db, peer.signerAddress, peer.url, meshSigners)
       if (result.inserted) {
         inserted++
         if (result.signer && !signer) signer = result.signer
@@ -147,11 +147,12 @@ async function validateAndInsert(
   record: MeshRecord,
   db: DB,
   peerSigner: string | null,
+  peerUrl: string,
   meshSigners: Set<string>,
 ): Promise<{ inserted: boolean; signer: string | null }> {
   if (record.signature === '0x') {
     console.warn(`[sync] unsigned record ${record.inputHash} — accepted (dry-run peer)`)
-    await db.insertRecord(record)
+    await db.insertRecord({ ...record, sourcePeer: record.sourcePeer ?? peerUrl })
     return { inserted: true, signer: null }
   }
 
@@ -174,7 +175,7 @@ async function validateAndInsert(
     }
   }
 
-  await db.insertRecord(record)
+  await db.insertRecord({ ...record, sourcePeer: record.sourcePeer ?? peerUrl })
   return { inserted: true, signer }
 }
 

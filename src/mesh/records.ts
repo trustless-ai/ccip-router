@@ -24,9 +24,12 @@ recordsRouter.get('/', async (c) => {
 
   return c.json({
     protocol:     1,
+    supported_protocols: [1],
     node_version: NODE_VERSION,
     namespace,
-    records,
+    // `key` is an internal storage column (== inputHash); it is not part of the
+    // signed commitment and is omitted from the wire format (see ERC mesh-sync spec).
+    records:      records.map(({ key, ...r }) => r),
     cursor:       nextCursor,
   })
 })
