@@ -12,6 +12,23 @@ No ENS required. No agents required. Any CCIP-Read project can plug in a resolve
 
 ---
 
+## Verify it yourself
+
+Every record ccip-router serves is independently checkable from public data — you never have to trust a node.
+
+**On-chain, trustless (no node in the loop).** The mesh's attestations recompute on Ethereum: call `verify(...)` on the live `WyriweProofVerifier` (Sepolia [`0x001eFFa0…DC96`](https://sepolia.etherscan.io/address/0x001eFFa0fD1D171b164808644678F3301d8EDC96#code)) — it recomputes the ERC-8281 / OCP commitment and recovers the signer entirely on-chain, **no external calls**. A `true` means the attestation is genuine; nothing here asks you to take its word.
+
+**Off-chain (one request).** Ask any mesh node for the signed proof of a record and check the signature yourself:
+
+```bash
+curl https://<node>/verify/<inputHash>
+# → { verified, signer, signingType, signature, attestation } — recover the EIP-712 signer offline and compare
+```
+
+Full detail: [Verify mesh sync](#verify-mesh-sync) · [contracts](#contracts).
+
+---
+
 ## What you can build
 
 ccip-router is a general-purpose CCIP-Read gateway. The resolver function is yours — the mesh, signing, and attestation pipeline come wired up around it.
