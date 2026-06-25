@@ -342,4 +342,4 @@ import {
 
 ---
 
-*Built by [dinamic.eth](https://github.com/Echo-Merlini/ccip-router) · MIT license*
+*Reference implementation of [ERC-8309](https://github.com/ethereum/ERCs/pull/1826) (Gateway Mesh Sync) · built by Tiago Merlini ([@TMerlini](https://github.com/TMerlini)) · live at `dinamic.eth` · MIT license*
