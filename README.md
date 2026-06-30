@@ -25,6 +25,15 @@ curl https://<node>/verify/<inputHash>
 # → { verified, signer, signingType, signature, attestation } — recover the EIP-712 signer offline and compare
 ```
 
+**Mesh-recompute — a *different* node re-derives the verdict (non-self-attested).** Don't trust the issuing gateway's verdict — ask a peer to recompute it from its **own** RPC. `GET /recompute/binding` re-derives an agent's source-token live-ownership (the composition-note Step-1 3-case sovereignty check: `ownerOf(source)` ∈ {agent holder, canonical ERC-6551 TBA, binding contract}) and returns its independent verdict, stamped with which node computed it:
+
+```bash
+curl "https://<node>/recompute/binding?registry=0x..&agentId=N&source=0x..&sourceId=M&chainId=1"
+# → { status: valid|invalid|unverifiable, matchedCase, sourceOwner, agentHolder, recomputedBy: { node, signer } }
+```
+
+The issuing gateway can fan this out to peers and report consensus — *"my verdict, confirmed by N independent nodes, 0 dissent."* Because the verdict derives only from public on-chain state, anyone recomputes it; the answer to *"if it's owned by no one, why trust this node?"* is *"you don't — here's a different node deriving the same result from its own reads."*
+
 Full detail: [Verify mesh sync](#verify-mesh-sync) · [contracts](#contracts).
 
 ---
