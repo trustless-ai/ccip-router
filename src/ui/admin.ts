@@ -1558,10 +1558,10 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
   <span class="stack-lbl">Stack</span>
   <span class="tier-pill off" id="tier-signed"><span class="tp-dot"></span>Signing</span>
   <span class="tier-pill off" id="tier-erc8004"><span class="tp-dot"></span>ERC-8004</span>
-  <span class="tier-pill off" id="tier-wyriwe"><span class="tp-dot"></span>WYRIWE</span>
-  <span class="tier-pill off" id="tier-ocp"><span class="tp-dot"></span>ERC-8281</span>
+  <span class="tier-pill off" id="tier-wyriwe"><span class="tp-dot"></span>ERC-8299 WYRIWE</span>
+  <span class="tier-pill off" id="tier-ocp"><span class="tp-dot"></span>ERC-8281 OCP</span>
   <span class="tier-pill off" id="tier-erc8263"><span class="tp-dot"></span>ERC-8263</span>
-  <span class="tier-pill off" id="tier-vni"><span class="tp-dot"></span>VNI</span>
+  <span class="tier-pill off" id="tier-vni"><span class="tp-dot"></span>ERC-8294 VNI</span>
   <span class="tier-pill off" id="tier-onchain"><span class="tp-dot"></span>On-chain</span>
 </div>
 
