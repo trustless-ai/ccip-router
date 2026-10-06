@@ -46,9 +46,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Echo-Merlini/ccip-router.git"
+    "url": "git+https://github.com/trustless-ai/ccip-router.git"
   },
-  "homepage": "https://github.com/Echo-Merlini/ccip-router#readme",
+  "homepage": "https://github.com/trustless-ai/ccip-router#readme",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
