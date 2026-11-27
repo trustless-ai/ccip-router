@@ -8,7 +8,7 @@ export const ATTESTATION_TYPEHASH =
 // input: sanitizationPipelineHash = keccak256(utf8(IDENTITY_SENTINEL_CID) || rawInputHash), and
 // inputHash == rawInputHash. (Before 0.9.2 this code used keccak256("IDENTITY_SENTINEL"), which
 // is not the ERC-8299 construction and bound nothing to the input.)
-export const IDENTITY_SENTINEL_CID = 'ipfs://QmccvoM6aRVgZ2dtFWvT6Wm3DmTvoAUHHotK7uQufnStVR' as const
+export const IDENTITY_SENTINEL_CID = 'ipfs://Qmccvom6aRVgZ2dtFWvT6Wm3DmTvoAUHHotK7uQufnStVR' as const
 /** @deprecated pre-0.9.2 sentinel string; kept for reading old records only. */
 export const IDENTITY_SENTINEL = 'IDENTITY_SENTINEL' as const
 
