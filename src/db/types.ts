@@ -77,6 +77,8 @@ export interface DB {
   // ERC-8309 /records page: `since` and order use this node's ingest time (see sqlite getRecordsPage).
   getRecordsPage(namespace: string, since: number, limit: number, cursor?: string): Promise<RecordsPage>
   getRecord(inputHash: string, namespace?: string): Promise<MeshRecord | null>
+  hasObservation(inputHash: string, namespace: string, value: string): Promise<boolean>
+  getRecordsAt(inputHash: string, namespace: string, timestamp: number): Promise<MeshRecord[]>
   getRecordsByInputHash(inputHash: string): Promise<MeshRecord[]>
   getRecordState(inputHash: string, namespace: string): Promise<RecordState>
   getAttestations(inputHash: string, namespace: string, value: string): Promise<MeshRecord[]>

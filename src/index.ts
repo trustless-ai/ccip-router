@@ -15,6 +15,7 @@ import { ocpRouter } from './verify/ocp.js'
 import { bindingRouter } from './verify/binding.js'
 import { createTseiProfileARouter } from './integrations/tseiProfileARouter.js'
 import { startSyncCron } from './mesh/cron.js'
+import { seedConfiguredPeers } from './mesh/sync.js'
 import { peersRouter } from './mesh/records.js'
 import { makeErc8309Vni, checkDelegation } from './mesh/vni.js'
 import { privateKeyToAccount as vniAccount } from 'viem/accounts'
@@ -71,11 +72,7 @@ const db = getDB(config.dbPath)
 
 // Seed configured peers into DB on startup.
 // Sync cron reads from DB, not env — peers added via UI later also persist.
-await Promise.all(
-  config.peers.map((url) =>
-    db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
-  )
-)
+await seedConfiguredPeers(db, config.peers)
 
 if (config.peers.length > 0) {
   console.log(`[mesh] ${config.peers.length} peer(s) registered: ${config.peers.join(', ')}`)

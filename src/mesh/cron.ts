@@ -1,7 +1,7 @@
 import cron from 'node-cron'
 import type { DB } from '../db/types.js'
 import type { Config } from '../config.js'
-import { syncPeer } from './sync.js'
+import { syncPeer, selfSignerOf } from './sync.js'
 
 export function startSyncCron(config: Config, db: DB): void {
   if (!cron.validate(config.syncInterval)) {
@@ -21,7 +21,7 @@ export function startSyncCron(config: Config, db: DB): void {
 
     await Promise.allSettled(
       peers.map(async (peer) => {
-        const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl ?? undefined)
+        const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl ?? undefined, selfSignerOf(config))
         await db.upsertPeer({ ...peer, ...update })
       }),
     )
