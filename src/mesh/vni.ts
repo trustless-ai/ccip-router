@@ -66,6 +66,28 @@ export async function verifyVni(vni: SignedVni): Promise<`0x${string}` | null> {
   }
 }
 
+// Fetch AND verify a peer's /vni, distinguishing a verified signer, a reachable node that serves
+// no verifiable /vni ('unverified'), and a network failure ('unreachable'). Sync treats only a
+// verified signer as the peer's identity (ERC-8309: never trust a self-reported signer).
+export type VniResolution =
+  | { status: 'verified'; signer: `0x${string}`; vni: SignedVni }
+  | { status: 'unverified' }
+  | { status: 'unreachable' }
+
+export async function resolvePeerVni(baseUrl: string): Promise<VniResolution> {
+  let res: Response
+  try {
+    res = await fetch(new URL('/vni', baseUrl).toString(), { signal: AbortSignal.timeout(5_000) })
+  } catch {
+    return { status: 'unreachable' }
+  }
+  if (!res.ok) return { status: 'unverified' }
+  let vni: SignedVni
+  try { vni = await res.json() as SignedVni } catch { return { status: 'unverified' } }
+  const signer = await verifyVni(vni)
+  return signer ? { status: 'verified', signer, vni } : { status: 'unverified' }
+}
+
 // Fetch and optionally verify a peer's VNI.
 export async function fetchPeerVni(baseUrl: string): Promise<SignedVni | null> {
   try {

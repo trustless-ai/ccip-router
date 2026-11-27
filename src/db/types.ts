@@ -26,7 +26,7 @@ export type PeerState = {
   lastSyncAt: number
   healthy: boolean
   nodeVersion: string | null
-  signerAddress: string | null  // recovered from signed records during sync
+  signerAddress: string | null  // set only from the peer's verified /vni (never gossip or /health)
 }
 
 export type Contribution = {
