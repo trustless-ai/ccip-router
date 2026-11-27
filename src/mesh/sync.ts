@@ -2,7 +2,7 @@ import type { DB, MeshRecord, PeerState } from '../db/types.js'
 import type { Config } from '../config.js'
 import { privateKeyToAccount } from 'viem/accounts'
 import { recoverRecordSigner } from '../crypto/index.js'
-import { recoverWyriweAttestation } from '../crypto/sign.js'
+import { trustedWyriweSigner } from '../crypto/sign.js'
 import { resolvePeerVni, type VniResolution } from './vni.js'
 import { NODE_VERSION } from '../version.js'
 
@@ -319,8 +319,9 @@ export async function validateAndInsert(
     // A record in another signing format (the WYRIWE EIP-712 attestation) whose EIP-712 signer is a
     // node we already trust is not an unknown signer: it is a known node's non-ERC-8309 record. Still
     // rejected, but not deferred, since re-pulling it cannot make it verify.
-    const alt = await recoverWyriweAttestation(record)
-    if (alt && (meshSigners.has(alt.toLowerCase()) || (peerSigner !== null && alt.toLowerCase() === peerSigner.toLowerCase()))) {
+    const trustedSet = new Set(meshSigners)
+    if (peerSigner) trustedSet.add(peerSigner.toLowerCase())
+    if (await trustedWyriweSigner(record, trustedSet)) {
       return { inserted: false, signer: null, reason: 'non_erc8309_signature' }
     }
     console.warn(

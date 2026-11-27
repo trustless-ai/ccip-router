@@ -1,7 +1,8 @@
 import { Hono } from 'hono'
 import { getDB } from '../db/index.js'
 import { getConfig } from '../config.js'
-import { recoverRecordSigner, recoverWyriweAttestation } from '../crypto/sign.js'
+import { recoverRecordSigner, trustedWyriweSigner } from '../crypto/sign.js'
+import { privateKeyToAccount } from 'viem/accounts'
 import { checkOnChain } from '../chain/publish.js'
 
 export const verifyRouter = new Hono()
@@ -46,6 +47,12 @@ verifyRouter.get('/:inputHash', async (c) => {
     return c.json({ inputHash, found: false }, 404)
   }
 
+  // "verified" means signed by a key this node knows — its own, or a peer signer verified through
+  // /vni — not merely that a signature recovers to some address (every well-formed one does).
+  const config = getConfig()
+  const known = new Set((await db.getPeers()).flatMap((p) => (p.signerAddress ? [p.signerAddress.toLowerCase()] : [])))
+  if (config.gatewayKey) known.add(privateKeyToAccount(config.gatewayKey).address.toLowerCase())
+
   const proofs = await Promise.all(
     records.map(async (record) => {
       const isDryRun = record.signature === '0x'
@@ -64,7 +71,8 @@ verifyRouter.get('/:inputHash', async (c) => {
       }
 
       if (isWyriwe) {
-        const signer = await recoverWyriweAttestation(record)
+        const match  = await trustedWyriweSigner(record, known)
+        const signer = match?.signer ?? null
         let attestation: Record<string, unknown> | null = null
         try { attestation = JSON.parse(record.value) } catch { /* malformed */ }
 
@@ -73,7 +81,7 @@ verifyRouter.get('/:inputHash', async (c) => {
           timestamp:   record.timestamp,
           sourcePeer:  record.sourcePeer,
           verified:    signer !== null,
-          signingType: 'EIP-712 WyriweAttestation',
+          signingType: match?.domain === 'legacy' ? 'EIP-712 WyriweAttestation (legacy domain)' : 'EIP-712 WyriweAttestation',
           signer,
           signature:   record.signature,
           attestation: attestation
@@ -101,7 +109,7 @@ verifyRouter.get('/:inputHash', async (c) => {
         namespace:   record.namespace,
         timestamp:   record.timestamp,
         sourcePeer:  record.sourcePeer,
-        verified:    signer !== null,
+        verified:    signer !== null && known.has(signer.toLowerCase()),
         signingType: 'EIP-191',
         signer,
         signature:   record.signature,

@@ -3458,12 +3458,13 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     1: {
       attestationIndex: '0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210',
       nodeRegistry:     '0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D',
-      wyriweVerifier:   '0xd8a09d830b27697e1b24e8c9800e562d20318a09',
+      // v1 (0xd8a0…8a09) accepted any signer; no v2 on mainnet yet — operators enter one when deployed.
+      wyriweVerifier:   '',
     },
     11155111: {
       attestationIndex: '0x107D706112225aC57eCf6692FBbDC283fb6E3698',
       nodeRegistry:     '0x6be4966596A9CBaa7260ab6EbbFFA69bBC9a42b7',
-      wyriweVerifier:   '0x9515D6e53D2D45C1CFE6181943ca11C150C2bf61',
+      wyriweVerifier:   '0x75E8012Da4d96504D275D79D282b649a3998A40d',   // WyriweProofVerifier v2 (signer-checked)
     },
   }
 

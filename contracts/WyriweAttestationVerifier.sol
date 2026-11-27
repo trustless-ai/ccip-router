@@ -16,6 +16,15 @@ import { IAttestationVerifier } from "./IAttestationVerifier.sol";
 ///         No external contract calls — fully self-contained.
 contract WyriweAttestationVerifier is IAttestationVerifier {
 
+    /// @notice The only signer this deployment accepts. Earlier deployments accepted ANY non-zero
+    ///         signer (anyone could sign an attestation and get `true`); this one checks it.
+    address public immutable attestor;
+
+    constructor(address attestor_) {
+        require(attestor_ != address(0), "attestor required");
+        attestor = attestor_;
+    }
+
     // ── Types ─────────────────────────────────────────────────────────────────
 
     struct WyriweAttestation {
@@ -49,7 +58,7 @@ contract WyriweAttestationVerifier is IAttestationVerifier {
     /// @param  proof            abi.encode(WyriweAttestation attestation, bytes signature)
     /// @return true if:
     ///           1. The recomputed OCP commitmentHash matches attestationHash.
-    ///           2. The EIP-712 signature over the struct is valid (non-zero signer recovered).
+    ///           2. The EIP-712 signature over the struct recovers to `attestor`.
     function verify(
         bytes32 attestationHash,
         bytes calldata proof
@@ -93,9 +102,7 @@ contract WyriweAttestationVerifier is IAttestationVerifier {
         ));
 
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
-        address signer = _recover(digest, sig);
-
-        return signer != address(0);
+        return _recover(digest, sig) == attestor;
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────
@@ -110,6 +117,7 @@ contract WyriweAttestationVerifier is IAttestationVerifier {
             s := mload(add(sig, 64))
             v := byte(0, mload(add(sig, 96)))
         }
+        if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) return address(0);
         if (v < 27) v += 27;
         if (v != 27 && v != 28) return address(0);
         return ecrecover(digest, v, r, s);
