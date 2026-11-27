@@ -54,3 +54,15 @@ describe('ERC-8309 sync: unsigned records', () => {
     assert.equal(r.inserted, false)
   })
 })
+
+describe('ERC-8309 sync: since margin', () => {
+  test('first pull asks for everything', async () => {
+    const { sinceFor } = await import('../mesh/sync.js')
+    assert.equal(sinceFor(0), 0)
+  })
+  test('later pulls start SINCE_SKEW_MARGIN_S before the last pull, never below 0', async () => {
+    const { sinceFor, SINCE_SKEW_MARGIN_S } = await import('../mesh/sync.js')
+    assert.equal(sinceFor(10_000), 10_000 - SINCE_SKEW_MARGIN_S)
+    assert.equal(sinceFor(30), 0)
+  })
+})

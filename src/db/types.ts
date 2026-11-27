@@ -14,6 +14,8 @@ export type MeshRecord = {
 
 // ERC-8309 record-store state for one (inputHash, namespace). Divergence is a
 // first-class outcome — never a silent drop, never folded into agreement.
+export type RecordsPage = { records: MeshRecord[]; cursor: string | null }
+
 export type RecordState =
   | { state: 'absent' }
   | { state: 'single'; record: MeshRecord }
@@ -70,7 +72,8 @@ export type NameRecord = {
 
 export interface DB {
   insertRecord(record: MeshRecord): Promise<void>
-  getRecordsSince(namespace: string, since: number, limit: number, cursor?: string): Promise<MeshRecord[]>
+  // ERC-8309 /records page: `since` and order use this node's ingest time (see sqlite getRecordsPage).
+  getRecordsPage(namespace: string, since: number, limit: number, cursor?: string): Promise<RecordsPage>
   getRecord(inputHash: string, namespace?: string): Promise<MeshRecord | null>
   getRecordsByInputHash(inputHash: string): Promise<MeshRecord[]>
   getRecordState(inputHash: string, namespace: string): Promise<RecordState>

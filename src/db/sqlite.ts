@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import { createHash } from 'node:crypto'
 import { SCHEMA, MIGRATIONS } from './schema.js'
 import { encodeJsonUtf8LfV0 } from '../lib/encodeJsonUtf8LfV0.js'
-import type { DB, MeshRecord, RecordState, PeerState, Contribution, NameRecord, Message, MessageType, JoinRequest } from './types.js'
+import type { DB, MeshRecord, RecordState, RecordsPage, PeerState, Contribution, NameRecord, Message, MessageType, JoinRequest } from './types.js'
 
 type EnsRow = {
   name:        string
@@ -21,6 +21,7 @@ type RecordRow = {
   timestamp: number
   signature: string
   source_peer: string | null
+  received_at?: number
 }
 
 type PeerRow = {
@@ -42,8 +43,14 @@ type JoinRequestRow = {
   created_at:     number
 }
 
+export type SQLiteDBOptions = {
+  // Clock for the serving node's ingest time (Unix seconds). Injectable for tests.
+  now?: () => number
+}
+
 export class SQLiteDB implements DB {
   private db: Database.Database
+  private now: () => number
 
   private stmts: {
     insert: Database.Statement
@@ -88,7 +95,8 @@ export class SQLiteDB implements DB {
     snapshotSetStatus:       Database.Statement
   }
 
-  constructor(path: string) {
+  constructor(path: string, opts: SQLiteDBOptions = {}) {
+    this.now = opts.now ?? (() => Math.floor(Date.now() / 1000))
     this.db = new Database(path)
     this.db.pragma('journal_mode = WAL')
     this.db.pragma('foreign_keys = ON')
@@ -98,29 +106,32 @@ export class SQLiteDB implements DB {
     this.stmts = {
       insert: this.db.prepare(`
         INSERT OR IGNORE INTO records
-          (input_hash, namespace, key, value, timestamp, signature, source_peer)
+          (input_hash, namespace, key, value, timestamp, signature, source_peer, received_at)
         VALUES
-          (@inputHash, @namespace, @key, @value, @timestamp, @signature, @sourcePeer)
+          (@inputHash, @namespace, @key, @value, @timestamp, @signature, @sourcePeer, @receivedAt)
       `),
 
-      // cursor is composite: timestamp|input_hash — avoids skipping records
-      // when multiple records share the same timestamp
+      // ERC-8309: `since` and order use the serving node's INGEST time (received_at), never the
+      // record's signed `timestamp` — a relayed record keeps its old timestamp and would otherwise
+      // be skipped by a peer that last polled after it. Order: received_at, input_hash, value.
       getSince: this.db.prepare(`
         SELECT * FROM records
-        WHERE namespace = @namespace AND timestamp > @since
-        ORDER BY timestamp ASC, input_hash ASC
+        WHERE namespace = @namespace AND received_at > @since
+        ORDER BY received_at ASC, input_hash ASC, value ASC
         LIMIT @limit
       `),
 
+      // Cursor = received_at|input_hash|k: resume at that (received_at, input_hash) group, skipping
+      // the k rows of it already returned (a group holds >1 row only for a divergence).
       getSinceAfterCursor: this.db.prepare(`
         SELECT * FROM records
         WHERE namespace = @namespace
           AND (
-            timestamp > @cursorTs
-            OR (timestamp = @cursorTs AND input_hash > @cursorHash)
+            received_at > @cursorTs
+            OR (received_at = @cursorTs AND input_hash >= @cursorHash)
           )
-        ORDER BY timestamp ASC, input_hash ASC
-        LIMIT @limit
+        ORDER BY received_at ASC, input_hash ASC, value ASC
+        LIMIT @limit OFFSET @cursorSkip
       `),
 
       // first match across all namespaces (basic tier lookup)
@@ -388,6 +399,7 @@ export class SQLiteDB implements DB {
       timestamp:  record.timestamp,
       signature:  record.signature,
       sourcePeer: record.sourcePeer,
+      receivedAt: this.now(),
     })
 
     // Retain the signed message for per-value corroboration (quorum-class policies count vantages).
@@ -422,27 +434,39 @@ export class SQLiteDB implements DB {
     return rows.map(toMeshRecord)
   }
 
-  async getRecordsSince(
+  async getRecordsPage(
     namespace: string,
     since: number,
     limit: number,
     cursor?: string,
-  ): Promise<MeshRecord[]> {
+  ): Promise<RecordsPage> {
     let rows: RecordRow[]
+    let prev: { ts: number; hash: string; skip: number } | null = null
 
     if (cursor) {
-      const [cursorTs, cursorHash] = cursor.split('|')
+      prev = parseRecordsCursor(cursor)
       rows = this.stmts.getSinceAfterCursor.all({
         namespace,
-        cursorTs:   Number(cursorTs),
-        cursorHash,
+        cursorTs:   prev.ts,
+        cursorHash: prev.hash,
+        cursorSkip: prev.skip,
         limit,
       }) as RecordRow[]
     } else {
       rows = this.stmts.getSince.all({ namespace, since, limit }) as RecordRow[]
     }
 
-    return rows.map(toMeshRecord)
+    let next: string | null = null
+    if (rows.length === limit && rows.length > 0) {
+      const last = rows[rows.length - 1]
+      const ts = last.received_at ?? 0
+      let skip = 0
+      for (let i = rows.length - 1; i >= 0 && rows[i].received_at === ts && rows[i].input_hash === last.input_hash; i--) skip++
+      if (prev && prev.ts === ts && prev.hash === last.input_hash && skip === rows.length) skip += prev.skip
+      next = `${ts}|${last.input_hash}|${skip}`
+    }
+
+    return { records: rows.map(toMeshRecord), cursor: next }
   }
 
   async getRecord(inputHash: string, namespace?: string): Promise<MeshRecord | null> {
@@ -710,6 +734,18 @@ function attestationIdentity(r: MeshRecord): { id: string; signed: number } {
     timestamp: r.timestamp,
   })
   return { id: 'unsigned:' + createHash('sha256').update(preimage, 'utf8').digest('hex'), signed: 0 }
+}
+
+// Cursor format received_at|input_hash|skip. A two-part cursor (pre-ingest-time nodes) resumes
+// with skip 0. Malformed parts fall back to the start of the range rather than throwing.
+export function parseRecordsCursor(cursor: string): { ts: number; hash: string; skip: number } {
+  const [ts, hash, skip] = cursor.split('|')
+  const n = Number(ts), k = Number(skip)
+  return {
+    ts:   Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0,
+    hash: typeof hash === 'string' ? hash : '',
+    skip: Number.isFinite(k) && k >= 0 ? Math.floor(k) : 0,
+  }
 }
 
 function toMeshRecord(row: RecordRow): MeshRecord {

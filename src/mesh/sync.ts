@@ -18,6 +18,13 @@ export async function syncAll(config: Config, db: DB): Promise<number> {
 
 const SUPPORTED_PROTOCOL = 1
 
+// ERC-8309: a peer compares `since` with ITS OWN ingest clock, so pull from a little before our last
+// successful pull to cover clock skew between the two nodes. Re-delivered records dedupe to no-ops.
+export const SINCE_SKEW_MARGIN_S = 60
+export function sinceFor(lastSyncAt: number): number {
+  return lastSyncAt > 0 ? Math.max(0, lastSyncAt - SINCE_SKEW_MARGIN_S) : 0
+}
+
 type RecordsResponse = {
   protocol:     number
   node_version: string
@@ -45,7 +52,7 @@ async function pullNamespace(
   let signer: string | null = null
 
   do {
-    const url  = buildRecordsUrl(peer.url, namespace, peer.lastSyncAt, cursor)
+    const url  = buildRecordsUrl(peer.url, namespace, sinceFor(peer.lastSyncAt), cursor)
     const body = await fetchRecords(url)
 
     if (body.protocol !== SUPPORTED_PROTOCOL) {
@@ -78,6 +85,9 @@ export async function syncPeer(
   nodeUrl?: string,
 ): Promise<Partial<PeerState>> {
   let discoveredSigner: string | null = null
+  // The next pull resumes from when THIS pull started, not when it finished: records the peer
+  // ingests while we are paginating must not fall behind our next `since`.
+  const startedAt = Math.floor(Date.now() / 1000)
 
   // Build the set of all known mesh signers once per sync cycle.
   // Records relayed through a peer may carry any registered node's signature —
@@ -127,7 +137,7 @@ export async function syncPeer(
 
     return {
       healthy:       true,
-      lastSyncAt:    Math.floor(Date.now() / 1000),
+      lastSyncAt:    startedAt,
       nodeVersion:   resolvedVersion,
       signerAddress: vniSigner ?? discoveredSigner ?? health?.signerAddress ?? peer.signerAddress,
     }
