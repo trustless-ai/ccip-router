@@ -3458,8 +3458,7 @@ const ADMIN_HTML = /* html */`<!DOCTYPE html>
     1: {
       attestationIndex: '0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210',
       nodeRegistry:     '0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D',
-      // v1 (0xd8a0…8a09) accepted any signer; no v2 on mainnet yet — operators enter one when deployed.
-      wyriweVerifier:   '',
+      wyriweVerifier:   '0xAa0da66A346ea92F223b4FA9E4bAAcDD68502B31',   // WyriweProofVerifier v2 (signer-checked); v1 0xd8a0…8a09 accepted any signer
     },
     11155111: {
       attestationIndex: '0x107D706112225aC57eCf6692FBbDC283fb6E3698',

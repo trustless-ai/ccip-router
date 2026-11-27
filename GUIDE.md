@@ -200,7 +200,8 @@ All ccip-router contracts are deployed and shared — no need to deploy your own
 |---|---|---|
 | `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) | ERC-8281 (OCP)-compatible commitment store — `signerOf[commitmentHash]` + `commitmentOf[inputHash]` |
 | `NodeRegistry` | [`0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D) | Public node directory |
-| `WyriweProofVerifier` v1 *(do not use)* | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) | ERC-8274 `IProofVerifier` — accepts a signature from any key; v2 pending on mainnet |
+| `WyriweProofVerifier` v2 | [`0xAa0da66A346ea92F223b4FA9E4bAAcDD68502B31`](https://etherscan.io/address/0xAa0da66A346ea92F223b4FA9E4bAAcDD68502B31#code) | ERC-8274 `IProofVerifier` — checks the signer against the attestor in `metadata` |
+| `WyriweProofVerifier` v1 *(do not use)* | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) | accepts a signature from any key |
 
 ### Sepolia (testnet)
 
