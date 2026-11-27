@@ -25,6 +25,9 @@ interface IProofVerifier {
     ) external view returns (bool);
 
     /// @notice Human-readable verifier name
+    /// @notice ERC-8274 proof system identifier, "{paradigm}/{variant}".
+    function proofSystem() external view returns (string memory);
+
     function name() external view returns (string memory);
 
     /// @notice Verifier version string

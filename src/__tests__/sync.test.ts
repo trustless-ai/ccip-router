@@ -369,3 +369,29 @@ describe('0.9.1: own signer, non-ERC-8309 records, startup seeding', () => {
     assert.ok(peers.some((x) => x.url === 'https://new.example' && x.signerAddress === null))
   })
 })
+
+describe('0.9.2: WYRIWE domain name (WyriweAttestation) and legacy recognition', () => {
+  async function wyriweRecord(domainName: string, key: `0x${string}`) {
+    const { buildDomain, WYRIWE_TYPES } = await import('../attestation/eip712.js')
+    const registry = '0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D' as const
+    const h = (b: string) => ('0x' + b.repeat(32)) as `0x${string}`
+    const msg = { agentId: h('01'), registry, modelHash: h('02'), rawInputHash: h('03'), sanitizationPipelineHash: h('04'),
+      inputHash: INPUT, outputHash: h('05'), commitmentHash: h('06'), timestamp: 1234n }
+    const sig = await privateKeyToAccount(key).signTypedData({ domain: buildDomain(1, registry, domainName), types: WYRIWE_TYPES, primaryType: 'WyriweAttestation', message: msg })
+    return { inputHash: INPUT, namespace: 'test-ns:wyriwe', key: INPUT, value: JSON.stringify({ ...msg, timestamp: '1234', chainId: 1 }), timestamp: 1234, signature: sig, sourcePeer: null } as MeshRecord
+  }
+
+  test('buildDomain defaults to the WyriweAttestation name the on-chain verifier checks', async () => {
+    const { buildDomain } = await import('../attestation/eip712.js')
+    assert.equal(buildDomain(1, '0x0000000000000000000000000000000000000001').name, 'WyriweAttestation')
+  })
+
+  test('trustedWyriweSigner finds a trusted signer under the current and the legacy domain, and nothing for strangers', async () => {
+    const { trustedWyriweSigner } = await import('../crypto/sign.js')
+    const trusted = new Set([SIGNER.toLowerCase()])
+    assert.equal((await trustedWyriweSigner(await wyriweRecord('WyriweAttestation', KEY), trusted))?.domain, 'current')
+    assert.equal((await trustedWyriweSigner(await wyriweRecord('ERC8004AttestationGateway', KEY), trusted))?.domain, 'legacy')
+    const STRANGER = '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' as const
+    assert.equal(await trustedWyriweSigner(await wyriweRecord('WyriweAttestation', STRANGER), trusted), null)
+  })
+})

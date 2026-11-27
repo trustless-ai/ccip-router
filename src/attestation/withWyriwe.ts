@@ -1,11 +1,11 @@
-import { keccak256, toBytes, encodeAbiParameters } from 'viem'
+import { keccak256, toHex, toBytes, concat } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { getDB } from '../db/index.js'
 import type { ResolverFn } from '../router/index.js'
 import {
   buildDomain,
   WYRIWE_TYPES,
-  IDENTITY_SENTINEL,
+  IDENTITY_SENTINEL_CID,
   type WyriweAttestation,
 } from './eip712.js'
 import { buildCommitmentHash } from './ocp.js'
@@ -16,45 +16,48 @@ export type WyriweOpts = {
   agentId:          `0x${string}`  // bytes32 — ERC-8004 agent identity
   modelHash:        `0x${string}`  // bytes32 — AI model identifier
   chainId?:         number         // chain where registry is deployed (default: 1)
-  sanitizationCID?: string         // IPFS CID / URI of sanitization pipeline; omit for sentinel (identity) path
+  sanitizationCID?: string         // full spec URI, e.g. "ipfs://Qm…"; omit for the identity (sentinel) path
+  sanitize?: (raw: `0x${string}`) => `0x${string}`  // REQUIRED with sanitizationCID: the transform the spec defines
+}
+
+// ERC-8299 triple-hash:
+//   rawInputHash             = keccak256(raw_user_input)
+//   sanitizationPipelineHash = keccak256(utf8(spec_uri) || rawInputHash)
+//   inputHash                = keccak256(sanitized_input)
+// Identity path: spec_uri = IDENTITY_SENTINEL_CID and sanitized_input = raw_user_input, so
+// inputHash == rawInputHash.
+export function wyriweTripleHash(
+  raw: `0x${string}`,
+  spec?: { uri: string; sanitize: (raw: `0x${string}`) => `0x${string}` },
+): { rawInputHash: `0x${string}`; sanitizationPipelineHash: `0x${string}`; inputHash: `0x${string}`; sanitized: `0x${string}` } {
+  const rawInputHash = keccak256(raw)
+  const uri = spec?.uri ?? IDENTITY_SENTINEL_CID
+  const sanitized = spec ? spec.sanitize(raw) : raw
+  return {
+    rawInputHash,
+    sanitizationPipelineHash: keccak256(concat([toHex(uri), rawInputHash])),   // both hex: utf8(uri) || rawInputHash
+    inputHash: keccak256(sanitized),
+    sanitized,
+  }
 }
 
 // Advanced tier — wraps any ResolverFn with full WYRIWE attestation production.
-//
-// Triple-hash chain (two paths):
-//
-//   Sentinel path (no sanitizationCID):
-//     sanitizationPipelineHash = keccak256("IDENTITY_SENTINEL")
-//     inputHash                = rawInputHash
-//
-//   Non-sentinel path (sanitizationCID provided):
-//     sanitizationPipelineHash = keccak256(sanitizationCID)
-//     inputHash                = keccak256(abi.encode(rawInputHash, sanitizationPipelineHash))
 export function withWyriwe(resolver: ResolverFn, opts: WyriweOpts): ResolverFn {
   const account      = privateKeyToAccount(opts.gatewayKey)
   const chainId      = opts.chainId ?? 1
-  const sentinelHash = keccak256(toBytes(IDENTITY_SENTINEL)) as `0x${string}`
+  if (opts.sanitizationCID && !opts.sanitize) {
+    // A spec URI alone cannot produce inputHash = keccak256(sanitized_input).
+    throw new Error('withWyriwe: sanitizationCID requires a sanitize function (ERC-8299 inputHash = keccak256(sanitized_input))')
+  }
+  const spec = opts.sanitizationCID && opts.sanitize ? { uri: opts.sanitizationCID, sanitize: opts.sanitize } : undefined
 
   return async (sender, calldata, namespace) => {
-    // ── Triple-hash chain ──────────────────────────────────────────────────
-    const rawInputHash = keccak256(calldata)
+    // ── Triple-hash chain (ERC-8299 §1–2) ──────────────────────────────────
+    const { rawInputHash, sanitizationPipelineHash, inputHash, sanitized } =
+      wyriweTripleHash(calldata as `0x${string}`, spec)
 
-    let sanitizationPipelineHash: `0x${string}`
-    let inputHash: `0x${string}`
-
-    if (opts.sanitizationCID) {
-      sanitizationPipelineHash = keccak256(toBytes(opts.sanitizationCID)) as `0x${string}`
-      inputHash = keccak256(encodeAbiParameters(
-        [{ type: 'bytes32' }, { type: 'bytes32' }],
-        [rawInputHash, sanitizationPipelineHash],
-      )) as `0x${string}`
-    } else {
-      sanitizationPipelineHash = sentinelHash
-      inputHash                = rawInputHash
-    }
-
-    // ── Resolver call ──────────────────────────────────────────────────────
-    const response = await resolver(sender, calldata, namespace)
+    // ── Resolver call: the resolver receives exactly what inputHash commits to ─
+    const response = await resolver(sender, sanitized, namespace)
 
     // ── Output hash ────────────────────────────────────────────────────────
     const outputHash = keccak256(toBytes(response))
