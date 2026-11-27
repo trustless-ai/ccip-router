@@ -1,6 +1,8 @@
 import type { DB, MeshRecord, PeerState } from '../db/types.js'
 import type { Config } from '../config.js'
+import { privateKeyToAccount } from 'viem/accounts'
 import { recoverRecordSigner } from '../crypto/index.js'
+import { recoverWyriweAttestation } from '../crypto/sign.js'
 import { resolvePeerVni, type VniResolution } from './vni.js'
 import { NODE_VERSION } from '../version.js'
 
@@ -9,7 +11,7 @@ export async function syncAll(config: Config, db: DB): Promise<number> {
   const peers = await db.getPeers()
   const results = await Promise.allSettled(
     peers.map(async (peer) => {
-      const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl ?? undefined)
+      const update = await syncPeer(peer, config.syncNamespace, db, config.autoDiscover, config.nodeUrl ?? undefined, selfSignerOf(config))
       await db.upsertPeer({ ...peer, ...update })
     }),
   )
@@ -17,6 +19,21 @@ export async function syncAll(config: Config, db: DB): Promise<number> {
 }
 
 const SUPPORTED_PROTOCOL = 1
+
+export function selfSignerOf(config: Pick<Config, 'gatewayKey'>): string | null {
+  return config.gatewayKey ? privateKeyToAccount(config.gatewayKey).address : null
+}
+
+// Seed the configured PEERS at startup without touching peers already stored: re-seeding them with
+// signerAddress null (the old behaviour) dropped every verified signer on restart, so relayed
+// records were rejected until each peer's /vni verified again within the same parallel cycle.
+export async function seedConfiguredPeers(db: DB, urls: string[]): Promise<void> {
+  const known = new Set((await db.getPeers()).map((p) => p.url))
+  for (const url of urls) {
+    if (known.has(url)) continue
+    await db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
+  }
+}
 
 // ERC-8309: a peer compares `since` with ITS OWN ingest clock, so pull from a little before our last
 // successful pull to cover clock skew between the two nodes. Re-delivered records dedupe to no-ops.
@@ -151,6 +168,7 @@ export async function syncPeer(
   db: DB,
   autoDiscover = true,
   nodeUrl?: string,
+  selfSigner: string | null = null,
 ): Promise<Partial<PeerState>> {
   // The next pull resumes from when THIS pull started, not when it finished: records the peer
   // ingests while we are paginating must not fall behind our next `since`.
@@ -181,6 +199,8 @@ export async function syncPeer(
       allPeers.flatMap((p) => (p.url !== peer.url && p.signerAddress ? [p.signerAddress.toLowerCase()] : []))
     )
     if (peerSigner) meshSigners.add(peerSigner.toLowerCase())
+    // This node's own key: peers relay our records back to us, and we are not our own peer.
+    if (selfSigner) meshSigners.add(selfSigner.toLowerCase())
 
     // Sync base namespace
     const base = await pullNamespace(peer, peerSigner, namespace, db, meshSigners)
@@ -230,6 +250,27 @@ export async function syncPeer(
   }
 }
 
+// Same-signer divergence: the SAME recovered signer signing two different values for the same
+// (inputHash, namespace) at the same timestamp. This replaces the old "double-sign" check, which keyed
+// on the advisory sourcePeer URL and fired on every re-attestation of an input over time.
+// It is recorded, not judged: on the live mesh the cases are amendments (the same attestation
+// re-signed with its on-chain anchor tx added), so whether a case is slashable equivocation is a
+// policy decision above ERC-8309, which prescribes no resolution policy. Checked only for NEW
+// observations, so re-delivered records do not log again. Returns the other records.
+export async function detectSameSignerDivergence(record: MeshRecord, signer: string, db: DB): Promise<MeshRecord[]> {
+  const conflicts: MeshRecord[] = []
+  for (const other of await db.getRecordsAt(record.inputHash, record.namespace, record.timestamp)) {
+    if (other.value === record.value || other.signature === '0x') continue
+    let s: string
+    try { s = await recoverRecordSigner(other) } catch { continue }
+    if (s.toLowerCase() === signer.toLowerCase()) conflicts.push(other)
+  }
+  if (conflicts.length) {
+    console.log(`[same-signer divergence] signer=${signer} input_hash=${record.inputHash} ns=${record.namespace} timestamp=${record.timestamp} — ${conflicts.length + 1} values signed for the same input and timestamp (recorded, not judged)`)
+  }
+  return conflicts
+}
+
 // ERC-8309: a record without a signature MUST be rejected. Unsigned "0x" records exist only on
 // dry-run nodes (no gateway key); a dev mesh of dry-run nodes can opt back in explicitly.
 export function acceptUnsignedRecords(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -249,7 +290,7 @@ export async function validateAndInsert(
   peerUrl: string,
   meshSigners: Set<string>,
   acceptUnsigned: boolean = acceptUnsignedRecords(),
-): Promise<{ inserted: boolean; signer: string | null; reason?: 'unsigned' | 'malformed_signature' | 'unknown_signer' }> {
+): Promise<{ inserted: boolean; signer: string | null; reason?: 'unsigned' | 'malformed_signature' | 'unknown_signer' | 'non_erc8309_signature' }> {
   if (record.signature === '0x') {
     if (!acceptUnsigned) {
       console.warn(`[sync] unsigned record ${record.inputHash} from ${peerUrl} — rejected (ERC-8309: records must be signed; set MESH_ACCEPT_UNSIGNED=true only on a dev mesh)`)
@@ -275,6 +316,13 @@ export async function validateAndInsert(
   const s = signer.toLowerCase()
   const fromPeer = peerSigner !== null && s === peerSigner.toLowerCase()
   if (!fromPeer && !meshSigners.has(s)) {
+    // A record in another signing format (the WYRIWE EIP-712 attestation) whose EIP-712 signer is a
+    // node we already trust is not an unknown signer: it is a known node's non-ERC-8309 record. Still
+    // rejected, but not deferred, since re-pulling it cannot make it verify.
+    const alt = await recoverWyriweAttestation(record)
+    if (alt && (meshSigners.has(alt.toLowerCase()) || (peerSigner !== null && alt.toLowerCase() === peerSigner.toLowerCase()))) {
+      return { inserted: false, signer: null, reason: 'non_erc8309_signature' }
+    }
     console.warn(
       `[sync] unknown signer on ${record.inputHash}: ${signer.slice(0, 10)}… via ${peerUrl}` +
       (peerSigner ? ` (peer signer ${peerSigner.slice(0, 10)}…)` : ' (peer has no verified signer)') + ' — rejected',
@@ -282,6 +330,9 @@ export async function validateAndInsert(
     return { inserted: false, signer: null, reason: 'unknown_signer' }
   }
 
+  if (!(await db.hasObservation(record.inputHash, record.namespace, record.value))) {
+    await detectSameSignerDivergence(record, signer, db)
+  }
   await db.insertRecord({ ...record, sourcePeer: record.sourcePeer ?? peerUrl })
   return { inserted: true, signer }
 }

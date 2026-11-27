@@ -72,7 +72,8 @@ export class SQLiteDB implements DB {
     recent: Database.Statement
     removePeer: Database.Statement
     contributions: Database.Statement
-    doubleSigns: Database.Statement
+    hasObservation: Database.Statement
+    recordsAt: Database.Statement
     ensUpsert: Database.Statement
     ensDelete: Database.Statement
     ensGet: Database.Statement
@@ -217,15 +218,14 @@ export class SQLiteDB implements DB {
         GROUP BY source_peer ORDER BY count DESC
       `),
 
-      // double-sign: same signer submitted the same (input_hash, namespace) with a different
-      // signature — slashable equivocation. Different signers attesting the same input is
-      // normal multi-node mesh behaviour and must NOT be flagged.
-      doubleSigns: this.db.prepare(`
-        SELECT input_hash FROM records
-        WHERE input_hash  = @inputHash
-          AND namespace   = @namespace
-          AND source_peer = @sourcePeer
-          AND signature  != @signature
+      // Equivocation lookups (see sync.ts detectEquivocation): is this exact observation stored, and
+      // which records share (input_hash, namespace, timestamp).
+      hasObservation: this.db.prepare(`
+        SELECT 1 FROM records WHERE input_hash = ? AND namespace = ? AND value = ? LIMIT 1
+      `),
+
+      recordsAt: this.db.prepare(`
+        SELECT * FROM records WHERE input_hash = ? AND namespace = ? AND timestamp = ?
       `),
 
       ensUpsert: this.db.prepare(`
@@ -386,16 +386,6 @@ export class SQLiteDB implements DB {
   }
 
   async insertRecord(record: MeshRecord): Promise<void> {
-    const existing = this.stmts.doubleSigns.get({
-      inputHash:  record.inputHash,
-      namespace:  record.namespace,
-      sourcePeer: record.sourcePeer,
-      signature:  record.signature,
-    })
-    if (existing) {
-      console.warn(`[double-sign] input_hash=${record.inputHash} ns=${record.namespace} signer=${record.sourcePeer} — flagged for future slashing`)
-    }
-
     this.stmts.insert.run({
       inputHash:  record.inputHash,
       namespace:  record.namespace,
@@ -472,6 +462,14 @@ export class SQLiteDB implements DB {
     }
 
     return { records: rows.map(toMeshRecord), cursor: next }
+  }
+
+  async hasObservation(inputHash: string, namespace: string, value: string): Promise<boolean> {
+    return !!this.stmts.hasObservation.get(inputHash, namespace, value)
+  }
+
+  async getRecordsAt(inputHash: string, namespace: string, timestamp: number): Promise<MeshRecord[]> {
+    return (this.stmts.recordsAt.all(inputHash, namespace, timestamp) as RecordRow[]).map(toMeshRecord)
   }
 
   async getRecord(inputHash: string, namespace?: string): Promise<MeshRecord | null> {

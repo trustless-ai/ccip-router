@@ -259,3 +259,113 @@ describe('ERC-8309 two-tier rotation end to end (stubbed network)', () => {
     } finally { globalThis.fetch = real }
   })
 })
+
+describe('0.9.1: same-signer divergence = same signer, same input, same timestamp, different value', () => {
+  function captureWarn() {
+    const warns: string[] = []; const orig = console.log
+    console.log = ((m?: unknown) => { warns.push(String(m)) }) as typeof console.log
+    return { warns, restore: () => { console.log = orig } }
+  }
+  const eq = (w: string[]) => w.filter((x) => x.includes('[same-signer divergence]')).length
+
+  test('flags two values signed by one key for the same input and timestamp', async () => {
+    const db = new SQLiteDB(':memory:')
+    const c = captureWarn()
+    try {
+      await validateAndInsert(await signed('0x30', 5000), db, SIGNER, PEER, new Set([SIGNER.toLowerCase()]), false)
+      await validateAndInsert(await signed('0x31', 5000), db, SIGNER, PEER, new Set([SIGNER.toLowerCase()]), false)
+    } finally { c.restore() }
+    assert.equal(eq(c.warns), 1)
+    assert.ok(c.warns.some((w) => w.includes(SIGNER)), 'names the recovered signer, not a URL')
+  })
+
+  test('does NOT flag successive re-attestations (different timestamps) — the live false positive', async () => {
+    const db = new SQLiteDB(':memory:')
+    const c = captureWarn()
+    try {
+      for (const [v, t] of [['0x40', 1000], ['0x41', 2000], ['0x42', 3000]] as const)
+        await validateAndInsert(await signed(v, t), db, SIGNER, PEER, new Set([SIGNER.toLowerCase()]), false)
+    } finally { c.restore() }
+    assert.equal(eq(c.warns), 0)
+  })
+
+  test('does NOT warn again when a stored record is re-delivered', async () => {
+    const db = new SQLiteDB(':memory:')
+    const a = await signed('0x50', 6000), b = await signed('0x51', 6000)
+    const c = captureWarn()
+    try {
+      for (const r of [a, b, a, b, a]) await validateAndInsert(r, db, SIGNER, PEER, new Set([SIGNER.toLowerCase()]), false)
+    } finally { c.restore() }
+    assert.equal(eq(c.warns), 1)
+  })
+
+  test('does NOT flag two different signers (that is an ERC-8309 divergence)', async () => {
+    const db = new SQLiteDB(':memory:')
+    const OTHER_KEY = '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' as const
+    const other = privateKeyToAccount(OTHER_KEY).address
+    const sig = await signRecord(INPUT, 'test-ns', '0x61', 7000, OTHER_KEY)
+    const known = new Set([SIGNER.toLowerCase(), other.toLowerCase()])
+    const c = captureWarn()
+    try {
+      await validateAndInsert(await signed('0x60', 7000), db, SIGNER, PEER, known, false)
+      await validateAndInsert({ inputHash: INPUT, namespace: 'test-ns', key: INPUT, value: '0x61', timestamp: 7000, signature: sig, sourcePeer: null }, db, SIGNER, PEER, known, false)
+    } finally { c.restore() }
+    assert.equal(eq(c.warns), 0)
+  })
+})
+
+describe('0.9.1: own signer, non-ERC-8309 records, startup seeding', () => {
+  test('a record signed by this node, relayed back by a peer, is not an unknown signer', async () => {
+    const { syncPeer } = await import('../mesh/sync.js')
+    const { makeVni } = await import('../mesh/vni.js')
+    const SELF_KEY = '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a' as const
+    const self = privateKeyToAccount(SELF_KEY).address
+    const own = await signRecord(INPUT, 'test-ns', '0x70', 1000, SELF_KEY)
+    const db = new SQLiteDB(':memory:')
+    const real = globalThis.fetch
+    const routes: Record<string, unknown> = {
+      [`${PEER}/vni`]: await makeVni(KEY, PEER),
+      [`${PEER}/records`]: { protocol: 1, node_version: 'x', namespace: 'test-ns', cursor: null,
+        records: [{ inputHash: INPUT, namespace: 'test-ns', key: INPUT, value: '0x70', timestamp: 1000, signature: own, sourcePeer: null }] },
+    }
+    globalThis.fetch = (async (input: any) => { const u = new URL(String(input)); const b = routes[u.origin + u.pathname]
+      return b === undefined ? new Response('nf', { status: 404 }) : new Response(JSON.stringify(b), { status: 200 }) }) as typeof fetch
+    try {
+      const peer = { url: PEER, lastSyncAt: 500, healthy: true, nodeVersion: null, signerAddress: null }
+      const update = await syncPeer(peer, 'test-ns', db, false, undefined, self)
+      assert.notEqual(update.lastSyncAt, 500, 'not deferred')
+      const without = await syncPeer(peer, 'test-ns', new SQLiteDB(':memory:'), false, undefined, null)
+      assert.equal(without.lastSyncAt, 500, 'control: without the self signer it is deferred')
+    } finally { globalThis.fetch = real }
+  })
+
+  test('a WYRIWE EIP-712 record from a trusted key is rejected as non_erc8309_signature, not unknown_signer', async () => {
+    const { buildDomain, WYRIWE_TYPES } = await import('../attestation/eip712.js')
+    const account = privateKeyToAccount(KEY)
+    const registry = '0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D' as const
+    const h = (b: string) => ('0x' + b.repeat(32)) as `0x${string}`
+    const msg = { agentId: h('01'), registry, modelHash: h('02'), rawInputHash: h('03'), sanitizationPipelineHash: h('04'),
+      inputHash: INPUT, outputHash: h('05'), commitmentHash: h('06'), timestamp: 1234n }
+    const sig = await account.signTypedData({ domain: buildDomain(1, registry), types: WYRIWE_TYPES, primaryType: 'WyriweAttestation', message: msg })
+    const value = JSON.stringify({ ...msg, timestamp: '1234', chainId: 1 })
+    const rec: MeshRecord = { inputHash: INPUT, namespace: 'test-ns:wyriwe', key: INPUT, value, timestamp: 1234, signature: sig, sourcePeer: null }
+    const db = new SQLiteDB(':memory:')
+    const known = await validateAndInsert(rec, db, null, PEER, new Set([SIGNER.toLowerCase()]), false)
+    assert.equal(known.reason, 'non_erc8309_signature')
+    assert.equal(known.inserted, false)
+    const unknown = await validateAndInsert(rec, db, null, PEER, new Set(), false)
+    assert.equal(unknown.reason, 'unknown_signer', 'control: an untrusted EIP-712 signer stays unknown')
+  })
+
+  test('seedConfiguredPeers adds new peers and leaves stored ones (and their verified signers) alone', async () => {
+    const { seedConfiguredPeers } = await import('../mesh/sync.js')
+    const db = new SQLiteDB(':memory:')
+    await db.upsertPeer({ url: PEER, lastSyncAt: 99, healthy: true, nodeVersion: null, signerAddress: SIGNER, identityKey: SIGNER, validFrom: 0 })
+    await seedConfiguredPeers(db, [PEER, 'https://new.example'])
+    const peers = await db.getPeers()
+    const p = peers.find((x) => x.url === PEER)!
+    assert.equal(p.signerAddress, SIGNER)
+    assert.equal(p.lastSyncAt, 99)
+    assert.ok(peers.some((x) => x.url === 'https://new.example' && x.signerAddress === null))
+  })
+})
