@@ -16,7 +16,7 @@ No ENS required. No agents required. Any CCIP-Read project can plug in a resolve
 
 Every record ccip-router serves is independently checkable from public data — you never have to trust a node.
 
-**On-chain, trustless (no node in the loop).** The mesh's attestations recompute on Ethereum: call `verify(...)` on the live `WyriweProofVerifier` v2 (Sepolia [`0x75E8…A40d`](https://sepolia.etherscan.io/address/0x75E8012Da4d96504D275D79D282b649a3998A40d#code)) — it recomputes the ERC-8281 / OCP commitment and checks that the EIP-712 signature recovers to the attestor named in `metadata`, entirely on-chain, **no external calls**. A `true` means that attestor signed exactly this attestation; whether that attestor speaks for the agent is the caller's check. (v1 at `0x001eFFa0…` on Sepolia and `0xd8a0…8a09` on mainnet accepted a signature from ANY key; do not use it.)
+**On-chain, trustless (no node in the loop).** The mesh's attestations recompute on Ethereum: call `verify(...)` on the live `WyriweProofVerifier` v2 (Sepolia [`0x75E8…A40d`](https://sepolia.etherscan.io/address/0x75E8012Da4d96504D275D79D282b649a3998A40d#code)) — it recomputes the ERC-8281 / OCP commitment and checks that the EIP-712 signature recovers to the attestor named in `metadata`, entirely on-chain, **no external calls**. A `true` means that attestor signed exactly this attestation; whether that attestor speaks for the agent is the caller's check. Mainnet v2: [`0xAa0d…2B31`](https://etherscan.io/address/0xAa0da66A346ea92F223b4FA9E4bAAcDD68502B31#code). (v1 at `0x001eFFa0…` on Sepolia and `0xd8a0…8a09` on mainnet accepted a signature from ANY key; do not use it.)
 
 **Off-chain (one request).** Ask any mesh node for the signed proof of a record and check the signature yourself:
 
@@ -184,7 +184,8 @@ Deployed by [`0xFf9a176577Fb42b6bc9c19fd05a241e8fCd0ca14`](https://sepolia.ether
 |---|---|
 | `NodeRegistry` | [`0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D`](https://etherscan.io/address/0x95a1e10D1508EF5CD11e3F4d296359c93f15e48D) |
 | `AttestationIndex` | [`0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210`](https://etherscan.io/address/0xc7BCCD785Fb994e570d0ca10D0F7899d87C82210) |
-| `WyriweProofVerifier` v1 *(do not use — accepts any signer; v2 is on Sepolia, mainnet pending)* | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) |
+| `WyriweProofVerifier` v2 | [`0xAa0da66A346ea92F223b4FA9E4bAAcDD68502B31`](https://etherscan.io/address/0xAa0da66A346ea92F223b4FA9E4bAAcDD68502B31#code) |
+| `WyriweProofVerifier` v1 *(do not use — accepts any signer)* | [`0xd8a09d830b27697e1b24e8c9800e562d20318a09`](https://etherscan.io/address/0xd8a09d830b27697e1b24e8c9800e562d20318a09) |
 
 Nodes register their URL by signing `keccak256("ccip-router:node:" + url)` with their signing key. The relayer (`msg.sender`) can differ from the signing key — no ETH required in the hot key. Four nodes are currently registered: NAS (`0x58766f90...`), Railway primary (`0x2048eADf...`), ENS Boiler (`0x85Fa1351...`), and Damon's node (`0x5e4F655f...`).
 
