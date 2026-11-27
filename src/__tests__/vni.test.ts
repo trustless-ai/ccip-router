@@ -53,3 +53,39 @@ describe('verifyVni', () => {
     assert.equal(result, null)
   })
 })
+
+describe('verifyVni: interop with other implementations', () => {
+  // Live /vni of the ENS Boiler gateway (an independent /records implementation), fetched 27 Nov 2026.
+  // It signs the five base fields and adds an unsigned `nodeType`.
+  const ENS_BOILER_VNI = {
+    nodeId: '0xed30845605b17e8ab79319314a05b645f9002ddcd746f7cc2e28251ef521360c',
+    signerAddress: '0x85Fa13511D170FBe173761b63D7f8DD4A6f6Bf1A',
+    url: 'https://gateway.verticecriativo.pt',
+    version: 'ens-boiler',
+    timestamp: 1795771915,
+    nodeType: 'Origin',
+    signature: '0x856aaacad533415da886825671d45ff49bc50884768dd985f39cdb9779a71a8e33144924b4a88fb763650de289bdfc3da9af1fff7cf62fc71c274e28bb000d931c',
+  } as any
+
+  test('accepts a valid document that carries extra unsigned fields', async () => {
+    assert.equal((await verifyVni(ENS_BOILER_VNI))?.toLowerCase(), ENS_BOILER_VNI.signerAddress.toLowerCase())
+  })
+
+  test('changing the unsigned extra field does not change the verdict (it is not trusted either way)', async () => {
+    assert.ok(await verifyVni({ ...ENS_BOILER_VNI, nodeType: 'Router' }))
+  })
+
+  test('changing a signed field still fails', async () => {
+    assert.equal(await verifyVni({ ...ENS_BOILER_VNI, timestamp: ENS_BOILER_VNI.timestamp + 1 }), null)
+  })
+
+  test('a nodeId that is not keccak256(signer) fails', async () => {
+    const vni = await makeVni(KEY, URL)
+    assert.equal(await verifyVni({ ...vni, nodeId: ('0x' + '11'.repeat(32)) as `0x${string}` }), null)
+  })
+
+  test('a non-object or unsigned document fails without throwing', async () => {
+    assert.equal(await verifyVni(null as any), null)
+    assert.equal(await verifyVni({} as any), null)
+  })
+})

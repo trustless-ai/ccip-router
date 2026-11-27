@@ -40,12 +40,24 @@ export async function makeVni(
 }
 
 // Verify a VNI's signature — returns the recovered signer or null.
+// The signed message is rebuilt from the five signed fields only, in makeVni's order. Other
+// implementations add unsigned fields (the ENS Boiler gateway serves `nodeType`); including them
+// in the message made a valid document fail, and they are never trusted. nodeId must be
+// keccak256 of the signer's 20 address bytes.
 export async function verifyVni(vni: SignedVni): Promise<`0x${string}` | null> {
   try {
-    const { signature, ...doc } = vni
+    if (!vni || typeof vni.signature !== 'string' || typeof vni.signerAddress !== 'string') return null
+    const doc: VniDocument = {
+      nodeId:        vni.nodeId,
+      signerAddress: vni.signerAddress,
+      url:           vni.url,
+      version:       vni.version,
+      timestamp:     vni.timestamp,
+    }
+    if (String(doc.nodeId).toLowerCase() !== keccak256(toBytes(doc.signerAddress)).toLowerCase()) return null
     const recovered = await recoverMessageAddress({
-      message:   vniMessage(doc as VniDocument),
-      signature,
+      message:   vniMessage(doc),
+      signature: vni.signature,
     })
     if (recovered.toLowerCase() !== vni.signerAddress.toLowerCase()) return null
     return recovered
