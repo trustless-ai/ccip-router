@@ -429,6 +429,9 @@ npm run dev
 | `RPC_URL` | No | — | JSON-RPC endpoint. Required alongside `ATTESTATION_INDEX`. |
 | `MODEL_HASH` | No | — | `keccak256` of model weights CID. Required to activate WYRIWE attestation. |
 | `NODE_URL` | No | — | This node's public URL. Required for VNI (signed node identity). |
+| `NODE_IDENTITY_KEY` | No | — | ERC-8309 two-tier identity: the identity key **address** (the key itself stays offline). Set with the two below, or not at all. |
+| `NODE_DELEGATION` | No | — | The identity key's delegation of `GATEWAY_PRIVATE_KEY`'s address, from `makeDelegation()`. Checked at startup; the node refuses to start if it does not match. |
+| `NODE_DELEGATION_VALID_FROM` | No | — | The delegation's `validFrom` (Unix seconds). Must increase with every rotation. |
 | `AUTO_DISCOVER` | No | `true` | Pull peer lists from synced peers automatically. |
 | `CDN_PROVIDER` | No | — | `pinata` or `storacha`. Enables IPFS upload from admin panel. |
 | `CDN_API_KEY` | No | — | API key / JWT for the configured CDN provider. |
@@ -669,10 +672,32 @@ GET /identity
 
 ### Node identity (VNI)
 ```
-GET /vni
-→ { nodeId, signerAddress, url, version, timestamp, signature }
+GET /vni      (ERC-8309)
+→ { nodeId, identityKey, signerAddress, delegation, validFrom, url, version: 1, timestamp, signature }
 → { declared: false }   (404 — NODE_URL not configured)
 ```
+
+`signature` is the signer's EIP-191 signature over the 32 raw bytes of
+`keccak256(abi.encode(nodeId, identityKey, signerAddress, uint64 validFrom, keccak256(url), uint256 version, uint64 timestamp))`.
+A **single-key** node (the default) serves `identityKey == signerAddress`, `delegation: "0x"`, `validFrom: 0`;
+its `nodeId` is unchanged from earlier versions. Peers also still accept the older
+`{ nodeId, signerAddress, url, version, timestamp, signature }` document as single-key.
+
+**Two-tier identity and rotation.** Peers pin the identity key, not the signer, and keep the highest
+`validFrom` they accepted. To rotate the gateway key without changing the node's identity:
+
+```ts
+import { makeDelegation } from 'ccip-router'
+// run offline, with the identity key; validFrom must exceed the previous one
+const d = await makeDelegation(IDENTITY_PRIVATE_KEY, NEW_SIGNER_ADDRESS, Math.floor(Date.now() / 1000))
+// → set NODE_IDENTITY_KEY=d.identityKey, NODE_DELEGATION=d.delegation,
+//   NODE_DELEGATION_VALID_FROM=d.validFrom, GATEWAY_PRIVATE_KEY=<new signer key>
+```
+
+To move an existing single-key node to two-tier without changing its `nodeId`, use its current
+gateway key as the identity key and delegate a new signer. A peer refuses a `/vni` whose identity
+differs from the one it pinned, a lower `validFrom` (rollback), or a `validFrom` more than 300 s in
+the future; re-pinning a peer is an operator action (remove and re-add it).
 
 ### Peer gossip
 ```

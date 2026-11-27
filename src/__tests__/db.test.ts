@@ -298,39 +298,85 @@ describe('getRecordsByInputHash', () => {
   })
 })
 
-describe('getRecordsSince + cursor pagination', () => {
-  test('returns records after a given timestamp', async () => {
-    const db = makeDB()
-    await db.insertRecord(makeRecord({ inputHash: '0x' + 'aa'.repeat(32), timestamp: 1000 }))
-    await db.insertRecord(makeRecord({ inputHash: '0x' + 'bb'.repeat(32), timestamp: 2000 }))
-    const recs = await db.getRecordsSince('test-ns', 1500, 100)
-    assert.equal(recs.length, 1)
-    assert.equal(recs[0].timestamp, 2000)
+describe('getRecordsPage: ingest-time since + cursor pagination (ERC-8309)', () => {
+  // A clock we can move: received_at is the serving node's ingest time, not the record timestamp.
+  function clockDB(start = 5000) {
+    let t = start
+    const db = new SQLiteDB(':memory:', { now: () => t })
+    return { db, set: (v: number) => { t = v } }
+  }
+  const H = (b: string) => '0x' + b.repeat(32)
+
+  test('since filters on ingest time, strictly greater', async () => {
+    const { db, set } = clockDB()
+    set(1000); await db.insertRecord(makeRecord({ inputHash: H('aa'), timestamp: 1 }))
+    set(2000); await db.insertRecord(makeRecord({ inputHash: H('bb'), timestamp: 2 }))
+    const a = await db.getRecordsPage('test-ns', 1500, 100)
+    assert.deepEqual(a.records.map((r) => r.inputHash), [H('bb')])
+    const b = await db.getRecordsPage('test-ns', 1000, 100)        // since == first ingest time
+    assert.deepEqual(b.records.map((r) => r.inputHash), [H('bb')])  // strict >
+    assert.equal(b.cursor, null)
     db.close()
   })
 
-  test('excludes a record at exactly `since` (strict >, not >=)', async () => {
-    const db = makeDB()
-    await db.insertRecord(makeRecord({ inputHash: '0x' + 'aa'.repeat(32), timestamp: 1000 }))
-    await db.insertRecord(makeRecord({ inputHash: '0x' + 'bb'.repeat(32), timestamp: 2000 }))
-    const recs = await db.getRecordsSince('test-ns', 1000, 100)  // since == first record's ts
-    assert.equal(recs.length, 1)                                  // ts=1000 excluded by strict >
-    assert.equal(recs[0].timestamp, 2000)
+  test('multi-hop: a relayed record with an OLD timestamp is still served to a peer that polled later', async () => {
+    // Node B. Peer C last polled B at t=2000. A record signed at t=100 (on node A) reaches B at t=2500.
+    const { db, set } = clockDB()
+    set(1900); await db.insertRecord(makeRecord({ inputHash: H('aa'), timestamp: 1900 }))
+    set(2500); await db.insertRecord(makeRecord({ inputHash: H('bb'), timestamp: 100, sourcePeer: 'https://a.example' }))
+    const page = await db.getRecordsPage('test-ns', 2000, 100)    // C's next pull, since = its last poll
+    assert.deepEqual(page.records.map((r) => r.inputHash), [H('bb')])
+    assert.equal(page.records[0].timestamp, 100)                   // signed timestamp is untouched
     db.close()
   })
 
-  test('cursor skips already-seen records', async () => {
-    const db = makeDB()
-    await db.insertRecord(makeRecord({ inputHash: '0x' + 'aa'.repeat(32), timestamp: 1000 }))
-    await db.insertRecord(makeRecord({ inputHash: '0x' + 'bb'.repeat(32), timestamp: 2000 }))
+  test('re-delivery of a stored record does not move its ingest time', async () => {
+    const { db, set } = clockDB()
+    set(1000); await db.insertRecord(makeRecord({ inputHash: H('aa') }))
+    set(9000); await db.insertRecord(makeRecord({ inputHash: H('aa') }))   // same observation again
+    assert.equal((await db.getRecordsPage('test-ns', 1000, 100)).records.length, 0)
+    db.close()
+  })
 
-    const page1 = await db.getRecordsSince('test-ns', 0, 1)
-    assert.equal(page1.length, 1)
-    const cursor = `${page1[0].timestamp}|${page1[0].inputHash}`
+  test('cursor walks every record exactly once, one per page', async () => {
+    const { db, set } = clockDB()
+    set(1000); await db.insertRecord(makeRecord({ inputHash: H('aa') }))
+    set(1000); await db.insertRecord(makeRecord({ inputHash: H('bb') }))
+    set(2000); await db.insertRecord(makeRecord({ inputHash: H('cc') }))
+    const seen: string[] = []
+    let cursor: string | undefined
+    for (let i = 0; i < 10; i++) {
+      const p = await db.getRecordsPage('test-ns', 0, 1, cursor)
+      seen.push(...p.records.map((r) => r.inputHash))
+      if (!p.cursor) break
+      cursor = p.cursor
+    }
+    assert.deepEqual(seen, [H('aa'), H('bb'), H('cc')])
+    db.close()
+  })
 
-    const page2 = await db.getRecordsSince('test-ns', 0, 1, cursor)
-    assert.equal(page2.length, 1)
-    assert.notEqual(page2[0].inputHash, page1[0].inputHash)
+  test('a divergence (same inputHash, same ingest second) is not skipped across page boundaries', async () => {
+    const { db } = clockDB(1000)
+    for (const v of ['0x01', '0x02', '0x03']) await db.insertRecord(makeRecord({ inputHash: H('aa'), value: v }))
+    await db.insertRecord(makeRecord({ inputHash: H('bb'), value: '0x09' }))
+    const seen: string[] = []
+    let cursor: string | undefined
+    for (let i = 0; i < 10; i++) {
+      const p = await db.getRecordsPage('test-ns', 0, 1, cursor)
+      seen.push(...p.records.map((r) => `${r.inputHash.slice(2, 4)}:${r.value}`))
+      if (!p.cursor) break
+      cursor = p.cursor
+    }
+    assert.deepEqual(seen, ['aa:0x01', 'aa:0x02', 'aa:0x03', 'bb:0x09'])
+    db.close()
+  })
+
+  test('a two-part cursor from an older node resumes without throwing', async () => {
+    const { db, set } = clockDB()
+    set(1000); await db.insertRecord(makeRecord({ inputHash: H('aa') }))
+    set(2000); await db.insertRecord(makeRecord({ inputHash: H('bb') }))
+    const p = await db.getRecordsPage('test-ns', 0, 100, `1000|${H('aa')}`)
+    assert.ok(p.records.some((r) => r.inputHash === H('bb')))
     db.close()
   })
 })
@@ -376,6 +422,22 @@ describe('peer operations', () => {
     await db.removePeer('http://peer-x')
     const peers = await db.getPeers()
     assert.equal(peers.length, 0)
+    db.close()
+  })
+})
+
+describe('peer identity pin (ERC-8309 two-tier)', () => {
+  test('an upsert without identityKey (startup seeding, admin re-add) keeps the pinned identity', async () => {
+    const db = makeDB()
+    const url = 'https://peer.example'
+    await db.upsertPeer({ url, lastSyncAt: 5, healthy: true, nodeVersion: null, signerAddress: '0xS', identityKey: '0xI', validFrom: 7 })
+    await db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
+    const p = (await db.getPeers()).find((x) => x.url === url)!
+    assert.equal(p.identityKey, '0xI')
+    assert.equal(p.validFrom, 7)
+    assert.equal(p.signerAddress, null)
+    await db.upsertPeer({ ...p, identityKey: '0xJ', validFrom: 9 })   // an explicit identity does update
+    assert.equal((await db.getPeers()).find((x) => x.url === url)!.identityKey, '0xJ')
     db.close()
   })
 })

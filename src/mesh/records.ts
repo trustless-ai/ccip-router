@@ -15,12 +15,8 @@ recordsRouter.get('/', async (c) => {
   const cursor    = c.req.query('cursor') ?? undefined
 
   const db = getDB()
-  const records = await db.getRecordsSince(namespace, since, limit, cursor)
-
-  // next cursor: timestamp|input_hash of the last record returned
-  const nextCursor = records.length === limit
-    ? `${records[records.length - 1].timestamp}|${records[records.length - 1].inputHash}`
-    : null
+  // `since` is compared with this node's ingest time, not the record timestamp (ERC-8309).
+  const { records, cursor: nextCursor } = await db.getRecordsPage(namespace, since, limit, cursor)
 
   return c.json({
     protocol:     1,

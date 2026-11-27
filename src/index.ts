@@ -16,7 +16,8 @@ import { bindingRouter } from './verify/binding.js'
 import { createTseiProfileARouter } from './integrations/tseiProfileARouter.js'
 import { startSyncCron } from './mesh/cron.js'
 import { peersRouter } from './mesh/records.js'
-import { makeVni } from './mesh/vni.js'
+import { makeErc8309Vni, checkDelegation } from './mesh/vni.js'
+import { privateKeyToAccount as vniAccount } from 'viem/accounts'
 import { messagesRouter } from './mesh/messages.js'
 import { keccak256, toBytes, recoverAddress, hashMessage } from 'viem'
 import { NODE_VERSION } from './version.js'
@@ -54,6 +55,17 @@ app.use('*', async (c, next) => {
   }
   await next()
 })
+
+// ERC-8309 two-tier identity: refuse to start with a delegation that does not authorise this
+// gateway key — serving it would make every peer refuse the node, or pin the wrong identity.
+if (config.nodeDelegation) {
+  if (!config.gatewayKey) throw new Error('[config] NODE_DELEGATION requires GATEWAY_PRIVATE_KEY')
+  const signer = vniAccount(config.gatewayKey).address
+  if (!(await checkDelegation(signer, config.nodeDelegation))) {
+    throw new Error(`[config] NODE_DELEGATION is not a valid delegation from ${config.nodeDelegation.identityKey} to ${signer} at validFrom ${config.nodeDelegation.validFrom}`)
+  }
+  console.log(`[config] identity:  two-tier, identity ${config.nodeDelegation.identityKey} delegates ${signer} (validFrom ${config.nodeDelegation.validFrom})`)
+}
 
 const db = getDB(config.dbPath)
 
@@ -143,7 +155,7 @@ app.get('/vni', async (c) => {
   if (!config.gatewayKey || !config.nodeUrl) {
     return c.json({ declared: false, reason: 'NODE_URL and GATEWAY_PRIVATE_KEY required' }, 404)
   }
-  const vni = await makeVni(config.gatewayKey, config.nodeUrl)
+  const vni = await makeErc8309Vni(config.gatewayKey, config.nodeUrl, config.nodeDelegation)
   return c.json(vni)
 })
 

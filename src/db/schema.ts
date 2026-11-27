@@ -174,4 +174,25 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
       -- so pre-existing "0x" rows are classified, not copied in as collisions.
     `,
   },
+  {
+    // ERC-8309 ingest-time `since`: received_at = when THIS node stored the record. Existing rows are
+    // backfilled with their signed timestamp, the best available ingest estimate, so peers whose
+    // last sync is past those timestamps are not sent the whole store again.
+    version: 9,
+    sql: `
+      ALTER TABLE records ADD COLUMN received_at INTEGER NOT NULL DEFAULT 0;
+      UPDATE records SET received_at = timestamp;
+      CREATE INDEX IF NOT EXISTS idx_records_ns_recv
+        ON records (namespace, received_at, input_hash, value);
+    `,
+  },
+  {
+    // ERC-8309 two-tier identity: peers pin the identity key (nodeId), not the signer, and keep the
+    // highest delegation validFrom accepted for it (rollback guard).
+    version: 10,
+    sql: `
+      ALTER TABLE peers ADD COLUMN identity_key TEXT;
+      ALTER TABLE peers ADD COLUMN valid_from   INTEGER;
+    `,
+  },
 ]

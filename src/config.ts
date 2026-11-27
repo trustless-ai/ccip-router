@@ -20,6 +20,8 @@ export type Config = {
   rpcUrl:           string | null          // JSON-RPC endpoint for reads + writes
   // Phase 3 open network — optional
   nodeUrl:          string | null          // this node's public URL (for VNI + NodeRegistry)
+  // ERC-8309 two-tier identity — optional. Without it the node is single-key (gateway key = identity).
+  nodeDelegation:   { identityKey: `0x${string}`; delegation: `0x${string}`; validFrom: number } | null
   nodeRegistry:     `0x${string}` | null  // deployed NodeRegistry contract (V1)
   nodeRegistryV2:   `0x${string}` | null  // deployed NodeRegistryV2 contract (with NodeType enum)
   nodeType:         number                   // 0=Origin 1=Router 2=Hybrid (default: 1)
@@ -143,6 +145,9 @@ export function loadConfig(): Config {
     ATTESTATION_INDEX:   process.env.ATTESTATION_INDEX   ?? file.attestationIndex,
     RPC_URL:             process.env.RPC_URL             ?? file.rpcUrl,
     NODE_URL:            process.env.NODE_URL             ?? file.nodeUrl,
+    NODE_IDENTITY_KEY:   process.env.NODE_IDENTITY_KEY,
+    NODE_DELEGATION:     process.env.NODE_DELEGATION,
+    NODE_DELEGATION_VALID_FROM: process.env.NODE_DELEGATION_VALID_FROM,
     NODE_REGISTRY:       process.env.NODE_REGISTRY        ?? file.nodeRegistry,
     NODE_REGISTRY_V2:    process.env.NODE_REGISTRY_V2      ?? file.nodeRegistryV2,
     NODE_TYPE:           process.env.NODE_TYPE               ?? String(file.nodeType ?? ''),
@@ -204,6 +209,27 @@ export function loadConfig(): Config {
   }
 
   const nodeUrl      = raw.NODE_URL?.trim() || null
+
+  // ERC-8309 two-tier identity: all three set, or none. The delegation is produced offline with the
+  // identity key (makeDelegation) and is checked against the gateway key at startup.
+  const dIdentity = (raw as any).NODE_IDENTITY_KEY?.trim()
+  const dSig      = (raw as any).NODE_DELEGATION?.trim()
+  const dFrom     = (raw as any).NODE_DELEGATION_VALID_FROM?.trim()
+  let nodeDelegation: Config['nodeDelegation'] = null
+  if (dIdentity || dSig || dFrom) {
+    if (!dIdentity || !dSig || !dFrom) {
+      throw new Error('[config] NODE_IDENTITY_KEY, NODE_DELEGATION and NODE_DELEGATION_VALID_FROM must be set together')
+    }
+    const validFrom = Number(dFrom)
+    if (!Number.isSafeInteger(validFrom) || validFrom <= 0) {
+      throw new Error('[config] NODE_DELEGATION_VALID_FROM must be a positive integer (Unix seconds)')
+    }
+    nodeDelegation = {
+      identityKey: requireHex('NODE_IDENTITY_KEY', dIdentity),
+      delegation:  requireHex('NODE_DELEGATION', dSig),
+      validFrom,
+    }
+  }
   const nodeRegistry = raw.NODE_REGISTRY?.trim()
     ? requireHex('NODE_REGISTRY', raw.NODE_REGISTRY.trim())
     : null
@@ -287,6 +313,7 @@ export function loadConfig(): Config {
     attestationIndex,
     rpcUrl,
     nodeUrl,
+    nodeDelegation,
     nodeRegistry,
     nodeRegistryV2,
     nodeType,
