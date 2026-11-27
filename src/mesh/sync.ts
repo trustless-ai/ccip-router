@@ -38,14 +38,46 @@ type HealthResponse = {
   signerAddress: string | null
 }
 
-// A peer's signer is only ever taken from its verified /vni. A verified result replaces the
-// stored signer; a reachable node with no verifiable /vni clears it (this also clears signers
-// stored by older versions from gossip or /health); a network failure keeps the last value,
-// which after this change can only have come from a verified /vni.
-export function resolvePeerSigner(previous: string | null, vni: VniResolution): string | null {
-  if (vni.status === 'verified') return vni.signer
-  if (vni.status === 'unverified') return null
-  return previous
+// A peer's signer is only ever taken from its verified /vni (never gossip, /health or the first
+// record it serves).
+export type PeerIdentity = { signerAddress: string | null; identityKey: string | null; validFrom: number | null }
+
+// Max seconds a delegation's validFrom may sit in the future (ERC-8309 validFrom monotonicity).
+export const VALID_FROM_SKEW_S = 300
+const eqi = (a: string | null | undefined, b: string | null | undefined) =>
+  !!a && !!b && a.toLowerCase() === b.toLowerCase()
+
+// ERC-8309 pinning. Peers pin the identity key (nodeId), not the signer.
+//  - first verified /vni pins its identity (if a signer was stored before identities existed, the
+//    new identity must be that key, or delegate to it: the existing key becomes the identity key);
+//  - later, a different identity is refused (re-pinning is an operator action: remove and re-add);
+//  - same identity: validFrom must increase strictly to change signer (rotation); equal validFrom
+//    is accepted only for the same signer, or when the signer was cleared; lower is a rollback;
+//  - a validFrom more than VALID_FROM_SKEW_S in the future is refused.
+// A refused document leaves the previous identity and signer in place.
+export function applyVniResolution(
+  prev: PeerIdentity,
+  res: VniResolution,
+  now: number,
+): PeerIdentity & { refused?: 'future_valid_from' | 'identity_mismatch' | 'identity_changed' | 'stale_valid_from' } {
+  if (res.status === 'unreachable') return prev
+  if (res.status === 'unverified') return { ...prev, signerAddress: null }
+
+  const next: PeerIdentity = { signerAddress: res.signer, identityKey: res.identityKey, validFrom: res.validFrom }
+  if (res.validFrom > now + VALID_FROM_SKEW_S) return { ...prev, refused: 'future_valid_from' }
+
+  if (!prev.identityKey) {
+    if (prev.signerAddress && !eqi(prev.signerAddress, res.identityKey) && !eqi(prev.signerAddress, res.signer)) {
+      return { ...prev, refused: 'identity_mismatch' }
+    }
+    return next
+  }
+  if (!eqi(prev.identityKey, res.identityKey)) return { ...prev, refused: 'identity_changed' }
+
+  const pv = prev.validFrom ?? 0
+  if (res.validFrom > pv) return next
+  if (res.validFrom === pv && (prev.signerAddress === null || eqi(prev.signerAddress, res.signer))) return next
+  return { ...prev, refused: 'stale_valid_from' }
 }
 
 // Bounded deferral (ERC-8309 rotation propagation): when records were rejected only because
@@ -127,12 +159,20 @@ export async function syncPeer(
   try {
     // Resolve the peer's identity from its verified /vni BEFORE accepting any of its records.
     // Never from gossip, /health or the signer of the first record it serves (ERC-8309).
-    const vniRes     = await resolvePeerVni(peer.url)
-    const peerSigner = resolvePeerSigner(peer.signerAddress, vniRes)
+    const vniRes   = await resolvePeerVni(peer.url)
+    const identity = applyVniResolution(
+      { signerAddress: peer.signerAddress, identityKey: peer.identityKey ?? null, validFrom: peer.validFrom ?? null },
+      vniRes, startedAt,
+    )
+    const peerSigner = identity.signerAddress
     if (vniRes.status === 'unverified') {
       console.warn(`[sync] ${peer.url} serves no verifiable /vni — only records from already-verified mesh signers are accepted`)
     }
+    if (identity.refused) {
+      console.warn(`[sync] ${peer.url} /vni refused (${identity.refused}) — keeping pinned identity ${identity.identityKey?.slice(0, 10) ?? 'none'}…`)
+    }
     const vni = vniRes.status === 'verified' ? vniRes.vni : null
+    const pin = { signerAddress: peerSigner, identityKey: identity.identityKey, validFrom: identity.validFrom }
 
     // Signers this node has verified through /vni: the peer's own plus every stored peer's.
     // Stored signers are written only from a verified /vni (gossip stores none).
@@ -146,7 +186,7 @@ export async function syncPeer(
     const base = await pullNamespace(peer, peerSigner, namespace, db, meshSigners)
     if (base.unsupported) {
       console.warn(`[sync] ${peer.url} speaks unsupported protocol — skipping`)
-      return { healthy: false, signerAddress: peerSigner }
+      return { healthy: false, ...pin }
     }
 
     // Sync wyriwe sub-namespace — best-effort, never fails the peer
@@ -166,7 +206,10 @@ export async function syncPeer(
     // Auto-discovery: pull peer's known peers and add any new ones
     if (autoDiscover) await discoverPeers(peer, db, nodeUrl)
 
-    const resolvedVersion = vni?.version ?? health?.version ?? peer.nodeVersion ?? null
+    // The legacy /vni carried the implementation version as a string; the ERC-8309 one carries the
+    // protocol version as a number, so the implementation version comes from /health there.
+    const vniImplVersion = typeof vni?.version === 'string' ? vni.version : undefined
+    const resolvedVersion = vniImplVersion ?? health?.version ?? peer.nodeVersion ?? null
 
     if (resolvedVersion && isOlderVersion(resolvedVersion, NODE_VERSION)) {
       console.warn(
@@ -179,7 +222,7 @@ export async function syncPeer(
       healthy:       true,
       lastSyncAt,
       nodeVersion:   resolvedVersion,
-      signerAddress: peerSigner,
+      ...pin,
     }
   } catch (err) {
     console.warn(`[sync] ${peer.url} unreachable — ${String(err)}`)

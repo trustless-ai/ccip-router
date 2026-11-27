@@ -27,6 +27,8 @@ export type PeerState = {
   healthy: boolean
   nodeVersion: string | null
   signerAddress: string | null  // set only from the peer's verified /vni (never gossip or /health)
+  identityKey?:  string | null  // ERC-8309 pinned identity key (nodeId = keccak256 of it); pinned on first verified /vni
+  validFrom?:    number | null  // highest delegation validFrom accepted for that identity
 }
 
 export type Contribution = {

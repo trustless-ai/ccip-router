@@ -30,6 +30,8 @@ type PeerRow = {
   healthy: number
   node_version: string | null
   signer_address: string | null
+  identity_key?: string | null
+  valid_from?: number | null
 }
 
 type JoinRequestRow = {
@@ -178,13 +180,16 @@ export class SQLiteDB implements DB {
       `),
 
       upsertPeer: this.db.prepare(`
-        INSERT INTO peers (url, last_sync_at, healthy, node_version, signer_address)
-        VALUES (@url, @lastSyncAt, @healthy, @nodeVersion, @signerAddress)
+        INSERT INTO peers (url, last_sync_at, healthy, node_version, signer_address, identity_key, valid_from)
+        VALUES (@url, @lastSyncAt, @healthy, @nodeVersion, @signerAddress, @identityKey, @validFrom)
         ON CONFLICT(url) DO UPDATE SET
           last_sync_at   = excluded.last_sync_at,
           healthy        = excluded.healthy,
           node_version   = excluded.node_version,
-          signer_address = excluded.signer_address
+          signer_address = excluded.signer_address,
+          -- the pinned identity survives upserts that do not carry it (startup seeding, re-adds)
+          identity_key   = CASE WHEN @setIdentity = 1 THEN excluded.identity_key ELSE peers.identity_key END,
+          valid_from     = CASE WHEN @setIdentity = 1 THEN excluded.valid_from   ELSE peers.valid_from   END
       `),
 
       getPeers: this.db.prepare(`SELECT * FROM peers`),
@@ -505,6 +510,9 @@ export class SQLiteDB implements DB {
       healthy:       peer.healthy ? 1 : 0,
       nodeVersion:   peer.nodeVersion,
       signerAddress: peer.signerAddress,
+      identityKey:   peer.identityKey ?? null,
+      validFrom:     peer.validFrom ?? null,
+      setIdentity:   peer.identityKey !== undefined ? 1 : 0,
     })
   }
 
@@ -767,6 +775,8 @@ function toPeerState(row: PeerRow): PeerState {
     healthy:       row.healthy === 1,
     nodeVersion:   row.node_version,
     signerAddress: row.signer_address,
+    identityKey:   row.identity_key ?? null,
+    validFrom:     row.valid_from ?? null,
   }
 }
 

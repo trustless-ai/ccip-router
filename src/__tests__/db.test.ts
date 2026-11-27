@@ -425,3 +425,19 @@ describe('peer operations', () => {
     db.close()
   })
 })
+
+describe('peer identity pin (ERC-8309 two-tier)', () => {
+  test('an upsert without identityKey (startup seeding, admin re-add) keeps the pinned identity', async () => {
+    const db = makeDB()
+    const url = 'https://peer.example'
+    await db.upsertPeer({ url, lastSyncAt: 5, healthy: true, nodeVersion: null, signerAddress: '0xS', identityKey: '0xI', validFrom: 7 })
+    await db.upsertPeer({ url, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null })
+    const p = (await db.getPeers()).find((x) => x.url === url)!
+    assert.equal(p.identityKey, '0xI')
+    assert.equal(p.validFrom, 7)
+    assert.equal(p.signerAddress, null)
+    await db.upsertPeer({ ...p, identityKey: '0xJ', validFrom: 9 })   // an explicit identity does update
+    assert.equal((await db.getPeers()).find((x) => x.url === url)!.identityKey, '0xJ')
+    db.close()
+  })
+})

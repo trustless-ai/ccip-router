@@ -186,4 +186,13 @@ export const MIGRATIONS: { version: number; sql: string }[] = [
         ON records (namespace, received_at, input_hash, value);
     `,
   },
+  {
+    // ERC-8309 two-tier identity: peers pin the identity key (nodeId), not the signer, and keep the
+    // highest delegation validFrom accepted for it (rollback guard).
+    version: 10,
+    sql: `
+      ALTER TABLE peers ADD COLUMN identity_key TEXT;
+      ALTER TABLE peers ADD COLUMN valid_from   INTEGER;
+    `,
+  },
 ]

@@ -89,3 +89,58 @@ describe('verifyVni: interop with other implementations', () => {
     assert.equal(await verifyVni({} as any), null)
   })
 })
+
+describe('ERC-8309 two-tier /vni', () => {
+  const IDENTITY = '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6' as `0x${string}`
+
+  test('single-key document: identity == signer, delegation 0x, validFrom 0, verifies', async () => {
+    const { makeErc8309Vni, verifyErc8309Vni, nodeIdOf } = await import('../mesh/vni.js')
+    const vni = await makeErc8309Vni(KEY, URL)
+    assert.equal(vni.identityKey, ADDR)
+    assert.equal(vni.delegation, '0x')
+    assert.equal(vni.validFrom, 0)
+    assert.equal(vni.version, 1)
+    assert.equal(vni.nodeId, nodeIdOf(ADDR))
+    assert.deepEqual(await verifyErc8309Vni(vni), { signer: ADDR, identityKey: ADDR, validFrom: 0 })
+  })
+
+  test('single-key nodeId equals the legacy nodeId (no identity change on upgrade)', async () => {
+    const { makeErc8309Vni } = await import('../mesh/vni.js')
+    assert.equal((await makeErc8309Vni(KEY, URL)).nodeId, (await makeVni(KEY, URL)).nodeId)
+  })
+
+  test('two-tier document verifies; nodeId derives from the identity key', async () => {
+    const { makeErc8309Vni, makeDelegation, verifyErc8309Vni, nodeIdOf } = await import('../mesh/vni.js')
+    const d = await makeDelegation(IDENTITY, ADDR, 1_700_000_000)
+    const vni = await makeErc8309Vni(KEY, URL, d)
+    assert.equal(vni.nodeId, nodeIdOf(d.identityKey))
+    assert.deepEqual(await verifyErc8309Vni(vni), { signer: ADDR, identityKey: d.identityKey, validFrom: 1_700_000_000 })
+  })
+
+  test('tampering fails: delegation for another signer, a changed validFrom, url, or a fake single-key delegation', async () => {
+    const { makeErc8309Vni, makeDelegation, verifyErc8309Vni } = await import('../mesh/vni.js')
+    const d = await makeDelegation(IDENTITY, ADDR, 1_700_000_000)
+    const vni = await makeErc8309Vni(KEY, URL, d)
+    const other = await makeDelegation(IDENTITY, '0x000000000000000000000000000000000000dEaD', 1_700_000_000)
+    assert.equal(await verifyErc8309Vni({ ...vni, delegation: other.delegation }), null)
+    assert.equal(await verifyErc8309Vni({ ...vni, validFrom: 1_700_000_001 }), null)
+    assert.equal(await verifyErc8309Vni({ ...vni, url: 'http://evil.example' }), null)
+    const single = await makeErc8309Vni(KEY, URL)
+    assert.equal(await verifyErc8309Vni({ ...single, validFrom: 5 }), null)
+    assert.equal(await verifyErc8309Vni({ ...single, delegation: d.delegation }), null)
+  })
+
+  test('verifyAnyVni accepts both the ERC-8309 and the legacy document', async () => {
+    const { makeErc8309Vni, verifyAnyVni } = await import('../mesh/vni.js')
+    assert.equal((await verifyAnyVni(await makeErc8309Vni(KEY, URL)))?.format, 'erc8309')
+    const legacy = await verifyAnyVni(await makeVni(KEY, URL))
+    assert.deepEqual(legacy, { signer: ADDR, identityKey: ADDR, validFrom: 0, format: 'legacy' })
+  })
+
+  test('checkDelegation rejects a delegation that does not authorise the signer', async () => {
+    const { makeDelegation, checkDelegation } = await import('../mesh/vni.js')
+    const d = await makeDelegation(IDENTITY, ADDR, 1_700_000_000)
+    assert.equal(await checkDelegation(ADDR, d), true)
+    assert.equal(await checkDelegation('0x000000000000000000000000000000000000dEaD', d), false)
+  })
+})

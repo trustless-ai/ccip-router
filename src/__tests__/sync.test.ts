@@ -68,12 +68,11 @@ describe('ERC-8309 sync: since margin', () => {
 })
 
 describe('ERC-8309 sync: signer trust comes only from a verified /vni', () => {
-  test('resolvePeerSigner: verified replaces, unverified clears, unreachable keeps', async () => {
-    const { resolvePeerSigner } = await import('../mesh/sync.js')
-    const vni = { status: 'verified', signer: SIGNER, vni: {} } as any
-    assert.equal(resolvePeerSigner('0xold', vni), SIGNER)
-    assert.equal(resolvePeerSigner('0xold', { status: 'unverified' }), null)
-    assert.equal(resolvePeerSigner('0xold', { status: 'unreachable' }), '0xold')
+  test('applyVniResolution: unreachable keeps, unverified clears the signer but keeps the pin', async () => {
+    const { applyVniResolution } = await import('../mesh/sync.js')
+    const prev = { signerAddress: '0xS', identityKey: '0xI', validFrom: 5 }
+    assert.deepEqual(applyVniResolution(prev, { status: 'unreachable' }, 1000), prev)
+    assert.deepEqual(applyVniResolution(prev, { status: 'unverified' }, 1000), { ...prev, signerAddress: null })
   })
 
   test('with no verified peer signer, a record signed by an unknown key is rejected', async () => {
@@ -158,5 +157,105 @@ describe('ERC-8309 syncPeer end to end (stubbed network)', () => {
     const victim = (await db.getPeers()).find((p) => p.url === VICTIM)
     assert.ok(victim, 'peer is still discovered')
     assert.equal(victim!.signerAddress, null, 'but its self-reported signer is not stored')
+  })
+})
+
+describe('ERC-8309 identity pinning (applyVniResolution)', () => {
+  const I = '0x1111111111111111111111111111111111111111'
+  const S1 = '0x2222222222222222222222222222222222222222'
+  const S2 = '0x3333333333333333333333333333333333333333'
+  const X = '0x4444444444444444444444444444444444444444'
+  const v = (signer: string, identityKey: string, validFrom: number) =>
+    ({ status: 'verified', signer, identityKey, validFrom, format: 'erc8309', vni: {} }) as any
+  const NOW = 1_800_000_000
+
+  test('first verified /vni pins the identity', async () => {
+    const { applyVniResolution } = await import('../mesh/sync.js')
+    assert.deepEqual(applyVniResolution({ signerAddress: null, identityKey: null, validFrom: null }, v(S1, I, 10), NOW),
+      { signerAddress: S1, identityKey: I, validFrom: 10 })
+  })
+
+  test('upgrade: a peer stored with a legacy signer may pin only that key as identity (or as signer)', async () => {
+    const { applyVniResolution } = await import('../mesh/sync.js')
+    assert.equal(applyVniResolution({ signerAddress: I, identityKey: null, validFrom: null }, v(S1, I, 10), NOW).identityKey, I)
+    assert.equal(applyVniResolution({ signerAddress: X, identityKey: null, validFrom: null }, v(S1, I, 10), NOW).refused, 'identity_mismatch')
+  })
+
+  test('rotation: same identity, strictly higher validFrom changes the signer', async () => {
+    const { applyVniResolution } = await import('../mesh/sync.js')
+    const r = applyVniResolution({ signerAddress: S1, identityKey: I, validFrom: 10 }, v(S2, I, 11), NOW)
+    assert.deepEqual(r, { signerAddress: S2, identityKey: I, validFrom: 11 })
+  })
+
+  test('rollback: a lower validFrom, or an equal one with a different signer, is refused', async () => {
+    const { applyVniResolution } = await import('../mesh/sync.js')
+    const prev = { signerAddress: S2, identityKey: I, validFrom: 11 }
+    assert.equal(applyVniResolution(prev, v(S1, I, 10), NOW).refused, 'stale_valid_from')
+    assert.equal(applyVniResolution(prev, v(S1, I, 11), NOW).refused, 'stale_valid_from')
+    assert.equal(applyVniResolution(prev, v(S1, I, 10), NOW).signerAddress, S2)   // pinned signer kept
+  })
+
+  test('equal validFrom is accepted again after the signer was cleared (restart / outage)', async () => {
+    const { applyVniResolution } = await import('../mesh/sync.js')
+    assert.equal(applyVniResolution({ signerAddress: null, identityKey: I, validFrom: 11 }, v(S2, I, 11), NOW).signerAddress, S2)
+  })
+
+  test('a different identity for a pinned peer is refused', async () => {
+    const { applyVniResolution } = await import('../mesh/sync.js')
+    const r = applyVniResolution({ signerAddress: S1, identityKey: I, validFrom: 10 }, v(X, X, 0), NOW)
+    assert.equal(r.refused, 'identity_changed')
+    assert.equal(r.identityKey, I)
+  })
+
+  test('a validFrom beyond the skew allowance is refused', async () => {
+    const { applyVniResolution, VALID_FROM_SKEW_S } = await import('../mesh/sync.js')
+    const prev = { signerAddress: S1, identityKey: I, validFrom: 10 }
+    assert.equal(applyVniResolution(prev, v(S2, I, NOW + VALID_FROM_SKEW_S + 1), NOW).refused, 'future_valid_from')
+    assert.equal(applyVniResolution(prev, v(S2, I, NOW + VALID_FROM_SKEW_S), NOW).signerAddress, S2)
+  })
+})
+
+describe('ERC-8309 two-tier rotation end to end (stubbed network)', () => {
+  const IDENTITY_KEY = '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6' as const
+  const NEW_SIGNER_KEY = '0x47e179ec197488593b187f80a00eb0da91f1b9d0b13f8733639f19c30a34926a' as const
+
+  test('after a rotation, records from the new signer are accepted and the identity stays pinned', async () => {
+    const { makeErc8309Vni, makeDelegation } = await import('../mesh/vni.js')
+    const { syncPeer } = await import('../mesh/sync.js')
+    const db = new SQLiteDB(':memory:')
+    const real = globalThis.fetch
+    const routes: Record<string, unknown> = {}
+    globalThis.fetch = (async (input: any) => {
+      const u = new URL(String(input)); const body = routes[u.origin + u.pathname]
+      return body === undefined ? new Response('nf', { status: 404 }) : new Response(JSON.stringify(body), { status: 200 })
+    }) as typeof fetch
+    try {
+      const now = Math.floor(Date.now() / 1000)
+      const d1 = await makeDelegation(IDENTITY_KEY, SIGNER, now - 100)
+      routes[`${PEER}/vni`] = await makeErc8309Vni(KEY, PEER, d1)
+      routes[`${PEER}/records`] = { protocol: 1, node_version: 'x', namespace: 'test-ns', records: [await signed('0x20')], cursor: null }
+      let peer = { url: PEER, lastSyncAt: 0, healthy: true, nodeVersion: null, signerAddress: null as string | null, identityKey: null as string | null, validFrom: null as number | null }
+      peer = { ...peer, ...(await syncPeer(peer, 'test-ns', db, false)) } as any
+      assert.equal(peer.identityKey?.toLowerCase(), d1.identityKey.toLowerCase())
+      assert.equal(peer.signerAddress?.toLowerCase(), SIGNER.toLowerCase())
+
+      // rotate: identity delegates a new signer with a higher validFrom
+      const newSigner = privateKeyToAccount(NEW_SIGNER_KEY).address
+      const d2 = await makeDelegation(IDENTITY_KEY, newSigner, now - 50)
+      routes[`${PEER}/vni`] = await makeErc8309Vni(NEW_SIGNER_KEY, PEER, d2)
+      const INPUT2 = ('0x' + 'cd'.repeat(32)) as `0x${string}`
+      const sig2 = await signRecord(INPUT2, 'test-ns', '0x21', 2000, NEW_SIGNER_KEY)
+      routes[`${PEER}/records`] = { protocol: 1, node_version: 'x', namespace: 'test-ns', cursor: null,
+        records: [{ inputHash: INPUT2, namespace: 'test-ns', key: INPUT2, value: '0x21', timestamp: 2000, signature: sig2, sourcePeer: null }] }
+      peer = { ...peer, ...(await syncPeer(peer, 'test-ns', db, false)) } as any
+      assert.equal(peer.signerAddress?.toLowerCase(), newSigner.toLowerCase())
+      assert.equal(peer.validFrom, now - 50)
+      assert.notEqual(await db.getRecord(INPUT2, 'test-ns'), null)
+
+      // replaying the old delegation (rollback) does not bring the old signer back
+      routes[`${PEER}/vni`] = await makeErc8309Vni(KEY, PEER, d1)
+      peer = { ...peer, ...(await syncPeer(peer, 'test-ns', db, false)) } as any
+      assert.equal(peer.signerAddress?.toLowerCase(), newSigner.toLowerCase())
+    } finally { globalThis.fetch = real }
   })
 })
