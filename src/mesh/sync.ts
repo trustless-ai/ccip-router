@@ -137,21 +137,32 @@ export async function syncPeer(
   }
 }
 
+// ERC-8309: a record without a signature MUST be rejected. Unsigned "0x" records exist only on
+// dry-run nodes (no gateway key); a dev mesh of dry-run nodes can opt back in explicitly.
+export function acceptUnsignedRecords(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.MESH_ACCEPT_UNSIGNED?.toLowerCase() === 'true'
+}
+
 // Validate a single record's signature then insert.
 // Signer pinning: if the peer's own signer is known, records from that signer are
 // unconditionally accepted. Records signed by a different key are accepted if the
 // signer belongs to any known mesh peer — this handles relayed records that a router
 // pulls from its DB and re-serves with the original signer intact. Records from an
-// unknown signer are rejected.
-async function validateAndInsert(
+// unknown signer are rejected. Unsigned records are rejected unless MESH_ACCEPT_UNSIGNED=true.
+export async function validateAndInsert(
   record: MeshRecord,
   db: DB,
   peerSigner: string | null,
   peerUrl: string,
   meshSigners: Set<string>,
+  acceptUnsigned: boolean = acceptUnsignedRecords(),
 ): Promise<{ inserted: boolean; signer: string | null }> {
   if (record.signature === '0x') {
-    console.warn(`[sync] unsigned record ${record.inputHash} — accepted (dry-run peer)`)
+    if (!acceptUnsigned) {
+      console.warn(`[sync] unsigned record ${record.inputHash} from ${peerUrl} — rejected (ERC-8309: records must be signed; set MESH_ACCEPT_UNSIGNED=true only on a dev mesh)`)
+      return { inserted: false, signer: null }
+    }
+    console.warn(`[sync] unsigned record ${record.inputHash} — accepted (MESH_ACCEPT_UNSIGNED=true, dev mesh)`)
     await db.insertRecord({ ...record, sourcePeer: record.sourcePeer ?? peerUrl })
     return { inserted: true, signer: null }
   }
