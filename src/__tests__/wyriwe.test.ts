@@ -5,10 +5,11 @@ import { IDENTITY_SENTINEL_CID } from '../attestation/eip712.js'
 import { wyriweTripleHash, withWyriwe } from '../attestation/withWyriwe.js'
 
 // ERC-8299 Test Case 1 (identity transform), values computed independently with `cast`
-// (keccak256 over utf8("ipfs://QmccvoM6…") || rawInputHash).
+// (keccak256 over utf8("ipfs://Qmccvom6…") || rawInputHash). The CID is the one IPFS serves for the
+// identity spec (760 bytes = ERC-8299 Appendix C + one trailing LF); the ERC text had "QmccvoM6", a typo.
 const RAW = toHex(toBytes('transfer 1 ETH to 0xABCD...'))
 const RAW_INPUT_HASH = '0x49a368dd77974bb589199333d0ee5e6796c1ae449b13b5336bdb5a3606ac4772'
-const PIPELINE_HASH = '0xebb1960748d3e0606a21326e17d2489750ec408cd81df457630f3af6b670f57c'
+const PIPELINE_HASH = '0x0bac6c485a2b53c833d464e1b41ff387363d1a529026984d7aff276cd1adec38'
 
 describe('ERC-8299 triple-hash (wyriweTripleHash)', () => {
   test('identity path reproduces the independently computed Test Case 1 vector', () => {
@@ -23,7 +24,7 @@ describe('ERC-8299 triple-hash (wyriweTripleHash)', () => {
   })
 
   test('the sentinel URI is the full ipfs:// URI', () => {
-    assert.equal(IDENTITY_SENTINEL_CID, 'ipfs://QmccvoM6aRVgZ2dtFWvT6Wm3DmTvoAUHHotK7uQufnStVR')
+    assert.equal(IDENTITY_SENTINEL_CID, 'ipfs://Qmccvom6aRVgZ2dtFWvT6Wm3DmTvoAUHHotK7uQufnStVR')
   })
 
   test('sanitized path: inputHash = keccak256(sanitized bytes), pipeline = keccak256(utf8(uri) || rawInputHash)', () => {
